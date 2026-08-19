@@ -273,6 +273,13 @@ a { color: var(--primary); text-decoration: none; }
   border-color: var(--border-strong);
 }
 
+/* Toggle-style toolbar buttons (e.g. click-to-open) */
+.main-toolbar button.toggle-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
 /* Dark mode toggle button */
 #btn-theme-toggle {
   width: 34px;

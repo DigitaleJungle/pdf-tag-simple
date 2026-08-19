@@ -17,8 +17,8 @@ let state = {
     currentSearch: "",       // Nội dung ô tìm kiếm
     currentSort: "name-asc", // Kiểu sắp xếp
     viewMode: "library",     // "library" | "trash"
-    selectedBooks: new Set() // Set<path> — sách đang được multi-select
-    
+    selectedBooks: new Set(), // Set<path> — sách đang được multi-select
+    openOnClick: localStorage.getItem("openOnClick") === "true" // false theo mặc định
 };
 window.__DEBUG_STATE__ = state;
 // ==========================================
@@ -44,6 +44,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const btnAiSettings       = document.querySelector("#btn-ai-settings");
     const btnFindDuplicates   = document.querySelector("#btn-find-duplicates");
     const btnThemeToggle      = document.querySelector("#btn-theme-toggle");
+    const btnToggleClickOpen  = document.querySelector("#btn-toggle-click-open");
 
     // Selection + trash buttons
     const btnTrashView        = document.querySelector("#btn-trash-view");
@@ -403,6 +404,27 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
+    // ==========================================
+    // CLICK-TO-OPEN TOGGLE
+    // Khi bật: 1 click mở PDF ngay, chọn sách bằng click bị vô hiệu.
+    // Trạng thái lưu vào localStorage, mặc định tắt.
+    // ==========================================
+    function applyClickOpenButton() {
+        if (!btnToggleClickOpen) return;
+        btnToggleClickOpen.classList.toggle("active", state.openOnClick);
+        btnToggleClickOpen.setAttribute("aria-pressed", String(state.openOnClick));
+    }
+    applyClickOpenButton();
+
+    if (btnToggleClickOpen) {
+        btnToggleClickOpen.addEventListener("click", () => {
+            state.openOnClick = !state.openOnClick;
+            localStorage.setItem("openOnClick", String(state.openOnClick));
+            applyClickOpenButton();
+            updateGrid();
+        });
+    }
+
     if (btnFindDuplicates) {
         btnFindDuplicates.addEventListener("click", () => {
             openDuplicates(() => refreshUi());
@@ -501,7 +523,8 @@ window.addEventListener("DOMContentLoaded", async () => {
             () => refreshUi(),
             state.viewMode,
             state.selectedBooks,
-            (path, shiftKey) => toggleSelectBook(path, shiftKey)
+            (path, shiftKey) => toggleSelectBook(path, shiftKey),
+            state.openOnClick
         );
     }
 

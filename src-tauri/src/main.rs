@@ -176,6 +176,23 @@ fn find_duplicates(app_handle: tauri::AppHandle) -> Result<Vec<db::DuplicateGrou
     db::find_duplicates(app_handle)
 }
 
+// ===== IN-APP READER =====
+
+#[tauri::command]
+fn get_pdf_page_count(app_handle: tauri::AppHandle, book_path: String) -> Result<u16, String> {
+    scanner::get_pdf_page_count(&app_handle, &book_path)
+}
+
+#[tauri::command]
+fn render_pdf_page(
+    app_handle: tauri::AppHandle,
+    book_path: String,
+    page_index: u16,
+    target_width: i32,
+) -> Result<Vec<u8>, String> {
+    scanner::render_pdf_page(&app_handle, &book_path, page_index, target_width)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -201,7 +218,9 @@ fn main() {
             check_ollama,
             rename_tag,
             delete_tag,
-            find_duplicates
+            find_duplicates,
+            get_pdf_page_count,
+            render_pdf_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

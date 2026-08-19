@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { openReader } from "./f_reader.js";
 
 // =============================================
 // CONTEXT MENU — hiện khi right click 1 card
@@ -39,7 +40,11 @@ export function showCardContextMenu(x, y, book, onUpdateSuccess, viewMode = "lib
 
   const items = [
     {
-      label: "Open PDF",
+      label: "Read in app",
+      action: () => openReader(book)
+    },
+    {
+      label: "Open in default app",
       action: async () => await window.__TAURI__.opener.openPath(book.path)
     },
     {

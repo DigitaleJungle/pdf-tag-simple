@@ -1,9 +1,12 @@
 use crate::db::{BookDatabase, BookEntry};
+use image::ImageFormat;
 use pdfium_render::prelude::*;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet};
 use std::fs::create_dir_all;
+use std::io::Cursor;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri::Emitter;
@@ -250,4 +253,95 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
         render_reused,
         render_fail
     ))
+}
+
+// =============================================
+// IN-APP READER
+// Render bất kỳ trang nào ra JPEG bytes theo yêu cầu, để hiện trong
+// reader overlay của frontend (scroll + zoom qua CSS, không re-render mỗi lần zoom)
+//
+// PERF: pdfium.load_pdf_from_file() re-parses toàn bộ file mỗi lần gọi — rất
+// tốn kém khi mở reader (đọc page count) rồi lại đọc lần nữa cho từng trang
+// hiện ra khi cuộn. Giữ lại Pdfium + vài PdfDocument đã mở gần nhất trong bộ
+// nhớ (static cache) để các lần gọi sau chỉ cần tái sử dụng, không parse lại.
+// =============================================
+static PDFIUM: OnceLock<Pdfium> = OnceLock::new();
+static DOC_CACHE: OnceLock<Mutex<DocCache>> = OnceLock::new();
+
+const MAX_CACHED_DOCS: usize = 6;
+
+struct DocCache {
+    docs: HashMap<String, PdfDocument<'static>>,
+    order: Vec<String>, // least-recently-used ở đầu
+}
+
+impl DocCache {
+    fn get_or_load(
+        &mut self,
+        pdfium: &'static Pdfium,
+        pdf_path: &str,
+    ) -> Result<&PdfDocument<'static>, String> {
+        if self.docs.contains_key(pdf_path) {
+            self.order.retain(|p| p != pdf_path);
+            self.order.push(pdf_path.to_string());
+        } else {
+            if self.order.len() >= MAX_CACHED_DOCS {
+                let oldest = self.order.remove(0);
+                self.docs.remove(&oldest);
+            }
+            let doc = pdfium
+                .load_pdf_from_file(pdf_path, None)
+                .map_err(|e| e.to_string())?;
+            self.docs.insert(pdf_path.to_string(), doc);
+            self.order.push(pdf_path.to_string());
+        }
+        Ok(self.docs.get(pdf_path).unwrap())
+    }
+}
+
+fn get_pdfium(app_handle: &tauri::AppHandle) -> Result<&'static Pdfium, String> {
+    if let Some(p) = PDFIUM.get() {
+        return Ok(p);
+    }
+    let p = init_pdfium(app_handle)?;
+    let _ = PDFIUM.set(p); // ignore race — another call may have set it first
+    Ok(PDFIUM.get().expect("Pdfium just initialized"))
+}
+
+fn doc_cache() -> &'static Mutex<DocCache> {
+    DOC_CACHE.get_or_init(|| {
+        Mutex::new(DocCache {
+            docs: HashMap::new(),
+            order: Vec::new(),
+        })
+    })
+}
+
+pub fn get_pdf_page_count(app_handle: &tauri::AppHandle, pdf_path: &str) -> Result<u16, String> {
+    let pdfium = get_pdfium(app_handle)?;
+    let mut cache = doc_cache().lock().map_err(|e| e.to_string())?;
+    let doc = cache.get_or_load(pdfium, pdf_path)?;
+    Ok(doc.pages().len())
+}
+
+pub fn render_pdf_page(
+    app_handle: &tauri::AppHandle,
+    pdf_path: &str,
+    page_index: u16,
+    target_width: i32,
+) -> Result<Vec<u8>, String> {
+    let pdfium = get_pdfium(app_handle)?;
+    let mut cache = doc_cache().lock().map_err(|e| e.to_string())?;
+    let doc = cache.get_or_load(pdfium, pdf_path)?;
+    let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
+    let bitmap = page
+        .render_with_config(&PdfRenderConfig::new().set_target_width(target_width))
+        .map_err(|e| e.to_string())?;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    bitmap
+        .as_image()
+        .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    Ok(bytes)
 }

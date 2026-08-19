@@ -48,4 +48,11 @@ export const api = {
     // Tính SHA1 nội dung file để tìm duplicate — chạy on-demand
     // Trả về [{file_hash, books: [...]}] — chỉ nhóm có > 1 file
     findDuplicates: () => invoke("find_duplicates"),
+
+    // ===== IN-APP READER =====
+    // Số trang của 1 PDF
+    getPdfPageCount: (path) => invoke("get_pdf_page_count", { bookPath: path }),
+    // Render 1 trang ra JPEG bytes ở độ rộng target_width (px)
+    renderPdfPage: (path, pageIndex, targetWidth) =>
+        invoke("render_pdf_page", { bookPath: path, pageIndex, targetWidth }),
 };

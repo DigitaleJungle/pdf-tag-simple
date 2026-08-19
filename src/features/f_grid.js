@@ -1,5 +1,6 @@
 import { createCard } from "./ui_grid_card.js";
 import { showCardContextMenu } from "./ui_grid_menu.js";
+import { openReader } from "./f_reader.js";
 
 // =============================================
 // GRID STATE — giữ trạng thái giữa các batch
@@ -19,7 +20,7 @@ let gridState = {
 export function renderAssetGrid(
     container, books, filterPath, search, sort, selectedTags,
     onGridUpdate, viewMode = "library",
-    selectedBooks = new Set(), onToggleSelect = null
+    selectedBooks = new Set(), onToggleSelect = null, openOnClick = false
 ) {
     if (observer) observer.disconnect();
 
@@ -39,10 +40,10 @@ export function renderAssetGrid(
         return;
     }
 
-    renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect);
+    renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClick);
 }
 
-function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect) {
+function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClick) {
     const { container, filteredBooks, displayCount, pageSize, viewMode } = gridState;
     const end = Math.min(displayCount + pageSize, filteredBooks.length);
 
@@ -52,10 +53,11 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect) {
 
         const card = createCard(
             book,
-            async (path) => await window.__TAURI__.opener.openPath(path),
+            (openedBook) => openReader(openedBook),
             (x, y, b) => showCardContextMenu(x, y, b, onGridUpdate, viewMode, selectedBooks),
             isSelected,
-            onToggleSelect
+            onToggleSelect,
+            openOnClick
         );
 
         gridState.cardMap[book.path] = card;
@@ -75,7 +77,7 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect) {
 
         observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting) {
-                renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect);
+                renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClick);
             }
         }, { rootMargin: "200px" });
 

@@ -9,8 +9,9 @@ import { api } from "./api.js";
 //   onContextMenu  — callback khi right click (context menu)
 //   isSelected     — bool, card đang được chọn không
 //   onToggleSelect — callback khi single click (toggle select)
+//   openOnClick    — bool, khi true: 1 click mở PDF ngay, double-click bị vô hiệu
 // =============================================
-export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null) {
+export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, openOnClick = false) {
     const card = document.createElement("div");
 
     // Hàm apply style theo trạng thái selected/unselected
@@ -234,6 +235,10 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
 
     card.addEventListener("click", (e) => {
         if (e.defaultPrevented) return;
+        if (openOnClick) {
+            onOpen(book);
+            return;
+        }
         clearTimeout(clickTimer);
         clickTimer = setTimeout(() => {
             if (typeof onToggleSelect === "function") {
@@ -243,8 +248,9 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     });
 
     card.addEventListener("dblclick", (e) => {
+        if (openOnClick) return; // single click already opens — ignore the second click
         clearTimeout(clickTimer);
-        onOpen(book.path);
+        onOpen(book);
     });
 
     card.addEventListener("contextmenu", (e) => {
