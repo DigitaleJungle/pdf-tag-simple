@@ -112,6 +112,17 @@ export function showCardContextMenu(x, y, book, onUpdateSuccess, viewMode = "lib
   }, 0);
 }
 
+// Lấy danh sách tên tag đã tồn tại, dùng cho dropdown gợi ý
+async function getAllTagNames() {
+    try {
+        const tags = await api.getTags();
+        return tags.map(t => t.name).sort((a, b) => a.localeCompare(b));
+    } catch (err) {
+        console.error("Failed to load tags for autocomplete:", err);
+        return [];
+    }
+}
+
 // Lấy đường dẫn folder chứa file
 function getFolderPath(filePath) {
   if (!filePath) return null;
@@ -129,8 +140,11 @@ function getFolderPath(filePath) {
 //   - Tags bấm Remove sẽ bị XÓA khỏi tất cả sách
 //   - Cho phép thấy rõ đang add gì, remove gì trước khi apply
 // =============================================
-function openBulkTagModal(paths, onSave) {
+async function openBulkTagModal(paths, onSave) {
     document.querySelectorAll(".edit-book-overlay").forEach(el => el.remove());
+    document.querySelectorAll(".tag-suggest-dropdown").forEach(el => el.remove());
+
+    const allTagNames = await getAllTagNames();
 
     let tagsToAdd = [];    // Tags sẽ được add vào tất cả sách
     let tagsToRemove = []; // Tags sẽ bị xóa khỏi tất cả sách
@@ -193,7 +207,7 @@ function openBulkTagModal(paths, onSave) {
     const addBlock = document.createElement("div");
     addBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text);">Add tags to all</div>`;
 
-    const addEditor = createTagEditor(tagsToAdd, "#eef4ff", "#1d4ed8", "#cfe0ff");
+    const addEditor = createTagEditor(tagsToAdd, "#eef4ff", "#1d4ed8", "#cfe0ff", allTagNames);
     addBlock.appendChild(addEditor.wrap);
     addBlock.appendChild(addEditor.helper("Enter to add. These tags will be added to all selected books."));
 
@@ -201,7 +215,7 @@ function openBulkTagModal(paths, onSave) {
     const removeBlock = document.createElement("div");
     removeBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:#c00;">Remove tags from all</div>`;
 
-    const removeEditor = createTagEditor(tagsToRemove, "#fff0f0", "#c00", "#ffd0d0");
+    const removeEditor = createTagEditor(tagsToRemove, "#fff0f0", "#c00", "#ffd0d0", allTagNames);
     removeBlock.appendChild(removeEditor.wrap);
     removeBlock.appendChild(removeEditor.helper("Enter to add. These tags will be removed from all selected books."));
 
@@ -223,6 +237,12 @@ function openBulkTagModal(paths, onSave) {
     saveBtn.innerText = `Apply to ${paths.length} books`;
     saveBtn.style.cssText = "border:1px solid var(--primary); background:var(--primary); color:white; border-radius:8px; padding:9px 16px; cursor:pointer; font-weight:600;";
 
+    function closeModal() {
+        addEditor.destroy();
+        removeEditor.destroy();
+        overlay.remove();
+    }
+
     // --- Save logic ---
     async function handleSave() {
         // Flush input chưa confirm
@@ -230,7 +250,7 @@ function openBulkTagModal(paths, onSave) {
         removeEditor.flush();
 
         if (tagsToAdd.length === 0 && tagsToRemove.length === 0) {
-            overlay.remove();
+            closeModal();
             return;
         }
 
@@ -265,17 +285,25 @@ function openBulkTagModal(paths, onSave) {
             }
         }
 
-        overlay.remove();
+        closeModal();
         if (typeof onSave === "function") onSave();
     }
 
-    cancelBtn.onclick = () => overlay.remove();
-    closeBtn.onclick  = () => overlay.remove();
+    cancelBtn.onclick = () => closeModal();
+    closeBtn.onclick  = () => closeModal();
     saveBtn.onclick   = handleSave;
 
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    // Chỉ đóng khi cả mousedown lẫn click đều nhắm vào overlay — tránh trường
+    // hợp bôi đen text trong modal rồi thả chuột ra ngoài (mouseup ngoài overlay
+    // vẫn khiến "click" nổ ra trên overlay) làm modal đóng ngoài ý muốn.
+    let mouseDownOnOverlay = false;
+    overlay.addEventListener("mousedown", (e) => { mouseDownOnOverlay = (e.target === overlay); });
+    overlay.addEventListener("click", (e) => {
+        if (mouseDownOnOverlay && e.target === overlay) closeModal();
+        mouseDownOnOverlay = false;
+    });
     document.addEventListener("keydown", function escHandler(e) {
-        if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", escHandler); }
+        if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", escHandler); }
     }, { once: true });
 
     footer.appendChild(cancelBtn);
@@ -288,7 +316,8 @@ function openBulkTagModal(paths, onSave) {
 }
 
 // Helper tạo tag editor tái sử dụng được cho cả Add và Remove section
-function createTagEditor(tagList, bgColor, textColor, borderColor) {
+// allTagNames: danh sách tag đã tồn tại (toàn bộ thư viện) dùng để hiện dropdown gợi ý
+function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames = []) {
     const wrap = document.createElement("div");
     wrap.style.cssText = `
         border:1px solid var(--border); border-radius:10px; padding:8px;
@@ -305,9 +334,74 @@ function createTagEditor(tagList, bgColor, textColor, borderColor) {
         color:var(--text);
     `;
 
+    // --- Suggestions dropdown ---
+    // Appended to <body> (not wrap) and positioned with `fixed` coords from
+    // wrap's bounding rect — the modal has `overflow:hidden` and no scroll
+    // region of its own, so a dropdown nested inside it would just stretch
+    // the modal taller instead of scrolling within its own 180px box.
+    const dropdown = document.createElement("div");
+    dropdown.className = "tag-suggest-dropdown";
+    dropdown.style.cssText = `
+        position:fixed;
+        background:var(--panel); border:1px solid var(--border);
+        border-radius:8px; box-shadow:var(--shadow-md);
+        max-height:180px; overflow-y:auto; z-index:3000; display:none;
+    `;
+    document.body.appendChild(dropdown);
+
+    function positionDropdown() {
+        const rect = wrap.getBoundingClientRect();
+        dropdown.style.left = rect.left + "px";
+        dropdown.style.width = rect.width + "px";
+        dropdown.style.top = (rect.bottom + 4) + "px";
+    }
+
+    let matches = [];
+    let highlighted = -1;
+
+    function closeDropdown() {
+        dropdown.style.display = "none";
+        dropdown.innerHTML = "";
+        matches = [];
+        highlighted = -1;
+    }
+
+    function setHighlight(i) {
+        const children = dropdown.children;
+        if (highlighted >= 0 && children[highlighted]) children[highlighted].style.background = "transparent";
+        highlighted = i;
+        if (children[i]) {
+            children[i].style.background = "var(--hover)";
+            children[i].scrollIntoView({ block: "nearest" });
+        }
+    }
+
+    function updateSuggestions() {
+        const query = input.value.trim().toLowerCase();
+        const existing = new Set(tagList.map(t => t.toLowerCase()));
+        const pool = allTagNames.filter(name => !existing.has(name.toLowerCase()));
+        matches = (query ? pool.filter(name => name.toLowerCase().includes(query)) : pool).slice(0, 50);
+
+        dropdown.innerHTML = "";
+        highlighted = -1;
+        if (matches.length === 0) { dropdown.style.display = "none"; return; }
+
+        matches.forEach((name, i) => {
+            const item = document.createElement("div");
+            item.innerText = name;
+            item.style.cssText = "padding:7px 10px; cursor:pointer; font-size:13px; color:var(--text); border-radius:6px;";
+            item.onmouseenter = () => setHighlight(i);
+            // preventDefault để input không mất focus trước khi click được xử lý
+            item.onmousedown = (e) => { e.preventDefault(); addTag(name); };
+            dropdown.appendChild(item);
+        });
+        positionDropdown();
+        dropdown.style.display = "block";
+    }
+
     function normalize(tag) { return tag.trim().replace(/\s+/g, " "); }
 
-    function renderChips() {
+    function renderChips(focusInput = true) {
         wrap.innerHTML = "";
         tagList.forEach((tag, index) => {
             const chip = document.createElement("span");
@@ -329,11 +423,12 @@ function createTagEditor(tagList, bgColor, textColor, borderColor) {
             wrap.appendChild(chip);
         });
         wrap.appendChild(input);
-        input.focus();
+        if (focusInput) input.focus();
     }
 
     function addTag(raw) {
         const tag = normalize(raw);
+        closeDropdown();
         if (!tag) return;
         if (tagList.some(t => t.toLowerCase() === tag.toLowerCase())) { input.value = ""; return; }
         tagList.push(tag);
@@ -341,15 +436,29 @@ function createTagEditor(tagList, bgColor, textColor, borderColor) {
         renderChips();
     }
 
+    input.addEventListener("input", updateSuggestions);
+    input.addEventListener("focus", updateSuggestions);
+
     input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(input.value); }
-        else if (e.key === "Backspace" && !input.value.trim() && tagList.length > 0) {
+        if (e.key === "ArrowDown") {
+            if (matches.length) { e.preventDefault(); setHighlight((highlighted + 1) % matches.length); }
+        } else if (e.key === "ArrowUp") {
+            if (matches.length) { e.preventDefault(); setHighlight((highlighted - 1 + matches.length) % matches.length); }
+        } else if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            addTag(highlighted >= 0 && matches[highlighted] ? matches[highlighted] : input.value);
+        } else if (e.key === "Escape") {
+            closeDropdown();
+        } else if (e.key === "Backspace" && !input.value.trim() && tagList.length > 0) {
             tagList.pop(); renderChips();
         }
     });
-    input.addEventListener("blur", () => { if (input.value.trim()) addTag(input.value); });
+    input.addEventListener("blur", () => {
+        if (input.value.trim()) addTag(input.value);
+        closeDropdown();
+    });
 
-    wrap.appendChild(input);
+    renderChips(false);
 
     return {
         wrap,
@@ -359,15 +468,21 @@ function createTagEditor(tagList, bgColor, textColor, borderColor) {
             el.innerText = text;
             return el;
         },
-        flush: () => { if (input.value.trim()) addTag(input.value); }
+        flush: () => { if (input.value.trim()) addTag(input.value); },
+        // Dropdown sống ở <body>, không phải con của wrap — phải dọn dẹp
+        // thủ công khi modal đóng, nếu không sẽ để lại node ẩn mồ côi.
+        destroy: () => { dropdown.remove(); }
     };
 }
 
 // =============================================
 // SINGLE EDIT MODAL — sửa tên + tags 1 sách
 // =============================================
-function openEditModal(book, onSave) {
+async function openEditModal(book, onSave) {
     document.querySelectorAll(".edit-book-overlay").forEach(el => el.remove());
+    document.querySelectorAll(".tag-suggest-dropdown").forEach(el => el.remove());
+
+    const allTagNames = await getAllTagNames();
 
     let currentName = book.file_name || "";
     let currentTags = Array.isArray(book.tags) ? [...book.tags] : [];
@@ -421,17 +536,9 @@ function openEditModal(book, onSave) {
     const tagBlock = document.createElement("div");
     tagBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text);">Tags</div>`;
 
-    const tagEditor = document.createElement("div");
-    tagEditor.style.cssText = "border:1px solid var(--border); border-radius:10px; padding:8px; min-height:52px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; background:var(--panel);";
-
-    const tagInput = document.createElement("input");
-    tagInput.type = "text";
-    tagInput.placeholder = "Type a tag and press Enter...";
-    tagInput.style.cssText = "border:none; outline:none; flex:1; min-width:180px; font-size:14px; padding:6px 2px; background:transparent; color:var(--text);";
-
-    const helper = document.createElement("div");
-    helper.style.cssText = "font-size:12px;color:var(--text-secondary);margin-top:6px;";
-    helper.innerText = "Enter to add a tag. Backspace on empty input to remove last tag.";
+    const tagEditor = createTagEditor(currentTags, "var(--primary-soft)", "var(--primary)", "var(--primary)", allTagNames);
+    tagBlock.appendChild(tagEditor.wrap);
+    tagBlock.appendChild(tagEditor.helper("Enter to add a tag. Backspace on empty input to remove last tag."));
 
     const footer = document.createElement("div");
     footer.style.cssText = "padding:14px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:var(--panel-soft);";
@@ -446,54 +553,21 @@ function openEditModal(book, onSave) {
 
     function normalizeTag(tag) { return tag.trim().replace(/\s+/g, " "); }
 
-    function renderTagChips() {
-        tagEditor.innerHTML = "";
-        currentTags.forEach((tag, index) => {
-            const chip = document.createElement("span");
-            chip.style.cssText = "display:inline-flex; align-items:center; gap:6px; background:var(--primary-soft); border:1px solid var(--primary); color:var(--primary); border-radius:999px; padding:6px 10px; font-size:12px; line-height:1;";
-            const text = document.createElement("span");
-            text.innerText = tag;
-            text.style.cssText = "max-width:180px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;";
-            const removeBtn = document.createElement("button");
-            removeBtn.type = "button";
-            removeBtn.innerText = "x";
-            removeBtn.title = `Remove tag: ${tag}`;
-            removeBtn.style.cssText = "border:none; background:transparent; color:var(--primary); font-size:14px; font-weight:bold; cursor:pointer; padding:0; line-height:1;";
-            removeBtn.onclick = () => { currentTags.splice(index, 1); renderTagChips(); };
-            chip.appendChild(text);
-            chip.appendChild(removeBtn);
-            tagEditor.appendChild(chip);
-        });
-        tagEditor.appendChild(tagInput);
-        tagInput.focus();
+    function closeModal() {
+        tagEditor.destroy();
+        overlay.remove();
     }
-
-    function addTag(rawValue) {
-        const tag = normalizeTag(rawValue);
-        if (!tag) return;
-        if (currentTags.some(t => t.toLowerCase() === tag.toLowerCase())) { tagInput.value = ""; return; }
-        currentTags.push(tag);
-        tagInput.value = "";
-        renderTagChips();
-    }
-
-    tagInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(tagInput.value); }
-        else if (e.key === "Backspace" && !tagInput.value.trim() && currentTags.length > 0) {
-            currentTags.pop(); renderTagChips();
-        }
-    });
-    tagInput.addEventListener("blur", () => { if (tagInput.value.trim()) addTag(tagInput.value); });
 
     async function handleSave() {
         try {
+            tagEditor.flush();
             const newName = nameInput.value.trim() || book.file_name;
             const cleanTags = currentTags.map(normalizeTag).filter(Boolean)
                 .filter((tag, index, arr) => arr.findIndex(t => t.toLowerCase() === tag.toLowerCase()) === index);
             saveBtn.disabled = true;
             saveBtn.innerText = "Saving...";
             await api.updateBook(book.path, newName, cleanTags);
-            overlay.remove();
+            closeModal();
             if (typeof onSave === "function") onSave();
         } catch (err) {
             alert("Error updating book: " + err);
@@ -502,17 +576,22 @@ function openEditModal(book, onSave) {
         }
     }
 
-    cancelBtn.onclick = () => overlay.remove();
-    closeBtn.onclick  = () => overlay.remove();
+    cancelBtn.onclick = () => closeModal();
+    closeBtn.onclick  = () => closeModal();
     saveBtn.onclick   = handleSave;
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+    // Chỉ đóng khi cả mousedown lẫn click đều nhắm vào overlay — tránh trường
+    // hợp bôi đen text trong modal rồi thả chuột ra ngoài làm modal đóng ngoài ý muốn.
+    let mouseDownOnOverlay = false;
+    overlay.addEventListener("mousedown", (e) => { mouseDownOnOverlay = (e.target === overlay); });
+    overlay.addEventListener("click", (e) => {
+        if (mouseDownOnOverlay && e.target === overlay) closeModal();
+        mouseDownOnOverlay = false;
+    });
     document.addEventListener("keydown", function escHandler(e) {
-        if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", escHandler); }
+        if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", escHandler); }
     }, { once: true });
 
-    tagEditor.appendChild(tagInput);
-    tagBlock.appendChild(tagEditor);
-    tagBlock.appendChild(helper);
     footer.appendChild(cancelBtn);
     footer.appendChild(saveBtn);
     body.appendChild(nameBlock);
@@ -522,6 +601,4 @@ function openEditModal(book, onSave) {
     modal.appendChild(footer);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
-
-    renderTagChips();
 }
