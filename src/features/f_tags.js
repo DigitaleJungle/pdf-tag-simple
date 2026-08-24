@@ -1,10 +1,43 @@
 let expanded = false;
 
-export function renderTagsUI(container, tagSearchInput, allTags, selectedTags, onTagChange, onTagRenamed = null, onTagDeleted = null) {
+export function renderTagsUI(
+    container, tagSearchInput, allTags, selectedTags, onTagChange,
+    onTagRenamed = null, onTagDeleted = null,
+    untaggedOnly = false, onUntaggedToggle = null
+) {
     if (!container) return;
     container.innerHTML = "";
 
     const filterKeyword = tagSearchInput ? tagSearchInput.value.trim().toLowerCase() : "";
+
+    // "No tags" — filters to books with zero tags. Mutually exclusive with
+    // picking actual tags below, so hidden while text-searching tag names
+    // (it isn't a tag name match) and not shown as combinable with them.
+    if (!filterKeyword && typeof onUntaggedToggle === "function") {
+        const untaggedBtn = document.createElement("button");
+        untaggedBtn.innerText = "No tags";
+        untaggedBtn.style.cssText = `
+            padding: 4px 8px;
+            font-size: 11px;
+            border-radius: 12px;
+            border: 1px solid ${untaggedOnly ? "var(--primary)" : "var(--border)"};
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+            font-style: italic;
+            background: ${untaggedOnly ? "var(--primary)" : "var(--panel)"};
+            color: ${untaggedOnly ? "white" : "var(--text-secondary)"};
+        `;
+        untaggedBtn.onclick = () => {
+            const nextUntagged = !untaggedOnly;
+            const nextSelected = nextUntagged ? [] : selectedTags;
+            onUntaggedToggle(nextUntagged);
+            if (nextUntagged && selectedTags.length > 0) onTagChange(nextSelected);
+            renderTagsUI(container, tagSearchInput, allTags, nextSelected, onTagChange, onTagRenamed, onTagDeleted, nextUntagged, onUntaggedToggle);
+        };
+        container.appendChild(untaggedBtn);
+    }
+
     let displayTags = [...allTags];
 
     if (filterKeyword) {
@@ -37,8 +70,11 @@ export function renderTagsUI(container, tagSearchInput, allTags, selectedTags, o
             const newSelected = isSelected
                 ? selectedTags.filter(t => t !== tagObj.name)
                 : [...selectedTags, tagObj.name];
+            // Picking a real tag implies non-empty tags — clear "No tags".
+            const clearingUntagged = untaggedOnly && newSelected.length > 0;
+            if (clearingUntagged && typeof onUntaggedToggle === "function") onUntaggedToggle(false);
             onTagChange(newSelected);
-            renderTagsUI(container, tagSearchInput, allTags, newSelected, onTagChange, onTagRenamed, onTagDeleted);
+            renderTagsUI(container, tagSearchInput, allTags, newSelected, onTagChange, onTagRenamed, onTagDeleted, clearingUntagged ? false : untaggedOnly, onUntaggedToggle);
         };
 
         // Right click — rename / delete
@@ -65,7 +101,7 @@ export function renderTagsUI(container, tagSearchInput, allTags, selectedTags, o
         `;
         toggleBtn.onclick = () => {
             expanded = !expanded;
-            renderTagsUI(container, tagSearchInput, allTags, selectedTags, onTagChange, onTagRenamed, onTagDeleted);
+            renderTagsUI(container, tagSearchInput, allTags, selectedTags, onTagChange, onTagRenamed, onTagDeleted, untaggedOnly, onUntaggedToggle);
         };
         container.appendChild(toggleBtn);
     }

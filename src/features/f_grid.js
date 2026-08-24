@@ -20,12 +20,13 @@ let gridState = {
 export function renderAssetGrid(
     container, books, filterPath, search, sort, selectedTags,
     onGridUpdate, viewMode = "library",
-    selectedBooks = new Set(), onToggleSelect = null, openOnClick = false
+    selectedBooks = new Set(), onToggleSelect = null, openOnClick = false,
+    untaggedOnly = false
 ) {
     if (observer) observer.disconnect();
 
     gridState.container = container;
-    gridState.filteredBooks = applyFilters(books, filterPath, search, sort, selectedTags);
+    gridState.filteredBooks = applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly);
     gridState.displayCount = 0;
     gridState.viewMode = viewMode;
     gridState.cardMap = {};
@@ -122,7 +123,7 @@ export function getFilteredPaths() {
     return gridState.filteredBooks.map(b => b.path);
 }
 
-function applyFilters(books, filterPath, search, sort, selectedTags) {
+function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly) {
     let result = books;
 
     // 1. Filter theo folder
@@ -140,8 +141,11 @@ function applyFilters(books, filterPath, search, sort, selectedTags) {
         result = result.filter(b => b.file_name.toLowerCase().includes(q));
     }
 
-    // 3. Filter theo tags (AND logic)
-    if (selectedTags && selectedTags.length > 0) {
+    // 3. Filter theo tags (AND logic) — hoặc chỉ lấy sách chưa có tag nào,
+    // 2 kiểu lọc này loại trừ lẫn nhau (chọn "No tags" là bỏ qua selectedTags).
+    if (untaggedOnly) {
+        result = result.filter(b => !b.tags || b.tags.length === 0);
+    } else if (selectedTags && selectedTags.length > 0) {
         result = result.filter(b => {
             if (!b.tags || b.tags.length === 0) return false;
             return selectedTags.every(st =>

@@ -14,6 +14,7 @@ let state = {
     books: [],               // Toàn bộ sách (cả hidden) — lấy từ backend
     tags: [],                // Tags để render sidebar (chỉ của sách không hidden)
     selectedTags: [],        // Tags đang filter
+    untaggedOnly: false,     // Lọc riêng sách chưa có tag nào — loại trừ với selectedTags
     currentFilterPath: null, // Folder đang chọn trong sidebar
     currentSearch: "",       // Nội dung ô tìm kiếm
     currentSort: "name-asc", // Kiểu sắp xếp
@@ -489,16 +490,25 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     if (tagSearchInput) {
         tagSearchInput.addEventListener("input", () => {
-            renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags, (newTags) => {
-                state.selectedTags = newTags;
-                updateGrid();
-            }, handleTagRenamed, handleTagDeleted);
+            renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
+                handleTagSelectionChange, handleTagRenamed, handleTagDeleted,
+                state.untaggedOnly, handleUntaggedToggle);
         });
     }
 
     // ==========================================
     // TAG MANAGEMENT CALLBACKS
     // ==========================================
+    function handleTagSelectionChange(newTags) {
+        state.selectedTags = newTags;
+        updateGrid();
+    }
+
+    function handleUntaggedToggle(newUntagged) {
+        state.untaggedOnly = newUntagged;
+        updateGrid();
+    }
+
     async function handleTagRenamed(oldName, newName) {
         try {
             await api.renameTag(oldName, newName);
@@ -528,10 +538,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         const paths = await api.getFolders();
 
         renderSidebar(sidebarContainer, paths, handleFolderSelection, handleDeleteFolder, state.books);
-        renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags, (newTags) => {
-            state.selectedTags = newTags;
-            updateGrid();
-        }, handleTagRenamed, handleTagDeleted);
+        renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
+            handleTagSelectionChange, handleTagRenamed, handleTagDeleted,
+            state.untaggedOnly, handleUntaggedToggle);
 
         updateTrashButton();
         updateSelectionUI();
@@ -554,7 +563,8 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.viewMode,
             state.selectedBooks,
             (path, shiftKey) => toggleSelectBook(path, shiftKey),
-            state.openOnClick
+            state.openOnClick,
+            state.untaggedOnly
         );
     }
 
