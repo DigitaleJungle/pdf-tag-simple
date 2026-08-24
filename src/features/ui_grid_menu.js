@@ -155,7 +155,7 @@ async function openBulkTagModal(paths, onSave) {
         position: fixed; inset: 0;
         background: rgba(0,0,0,0.35);
         display: flex; align-items: center; justify-content: center;
-        z-index: 2000; padding: 20px;
+        z-index: 8000; padding: 20px;
     `;
 
     const modal = document.createElement("div");
@@ -345,7 +345,7 @@ function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames =
         position:fixed;
         background:var(--panel); border:1px solid var(--border);
         border-radius:8px; box-shadow:var(--shadow-md);
-        max-height:180px; overflow-y:auto; z-index:3000; display:none;
+        max-height:180px; overflow-y:auto; z-index:8500; display:none;
     `;
     document.body.appendChild(dropdown);
 
@@ -497,7 +497,7 @@ function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames =
 // =============================================
 // SINGLE EDIT MODAL — sửa tên + tags 1 sách
 // =============================================
-async function openEditModal(book, onSave) {
+export async function openEditModal(book, onSave) {
     document.querySelectorAll(".edit-book-overlay").forEach(el => el.remove());
     document.querySelectorAll(".tag-suggest-dropdown").forEach(el => el.remove());
 
@@ -511,7 +511,7 @@ async function openEditModal(book, onSave) {
     overlay.style.cssText = `
         position:fixed; inset:0; background:rgba(0,0,0,0.35);
         display:flex; align-items:center; justify-content:center;
-        z-index:2000; padding:20px;
+        z-index:8000; padding:20px;
     `;
 
     const modal = document.createElement("div");
@@ -630,4 +630,7 @@ async function openEditModal(book, onSave) {
     modal.appendChild(footer);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
+
+    nameInput.focus();
+    nameInput.select();
 }

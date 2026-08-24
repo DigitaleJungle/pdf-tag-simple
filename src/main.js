@@ -2,6 +2,7 @@ import { api } from "./features/api.js";
 import { renderSidebar } from "./features/f_sidebar.js";
 import { renderAssetGrid, updateCardSelectionVisual, getShiftSelectRange, getBookIndex, setLastClickedIndex, getLastClickedIndex, getFilteredPaths } from "./features/f_grid.js";
 import { renderTagsUI } from "./features/f_tags.js";
+import { openEditModal } from "./features/ui_grid_menu.js";
 import { pickLibraryFolder } from "./features/f_addfolder.js";
 import { openAiSettings, openAiAutoTag } from "./features/f_ai.js";
 import { openDuplicates } from "./features/f_duplicates.js";
@@ -140,6 +141,35 @@ window.addEventListener("DOMContentLoaded", async () => {
             // Starred books sẽ lên đầu lần sau vào folder hoặc refresh
             const book = state.books.find(b => b.path === path);
             if (book) book.starred = newState;
+        },
+        // Gọi từ f_reader.js — mở modal edit name & tags cho sách đang đọc.
+        // onSaved (nếu có) nhận lại book đã update để reader tự cập nhật title.
+        editBook: (book, onSaved) => {
+            openEditModal(book, async () => {
+                await refreshUi();
+                if (typeof onSaved === "function") {
+                    onSaved(state.books.find(b => b.path === book.path) || null);
+                }
+            });
+        },
+        // Gọi từ f_reader.js — lấy sách kế trước/sau (direction: -1 | 1) theo
+        // đúng thứ tự đang hiện trong grid (đã filter/sort), dùng cho nút
+        // chuyển trang trong reader.
+        getAdjacentBook: (path, direction) => {
+            const paths = getFilteredPaths();
+            const idx = paths.indexOf(path);
+            if (idx === -1) return null;
+            const newIdx = idx + direction;
+            if (newIdx < 0 || newIdx >= paths.length) return null;
+            return state.books.find(b => b.path === paths[newIdx]) || null;
+        },
+        // Gọi từ f_reader.js — lấy sách đầu/cuối (edge: "first" | "last")
+        // theo đúng thứ tự đang hiện trong grid, dùng cho nút "first/last" trong reader.
+        getBoundaryBook: (edge) => {
+            const paths = getFilteredPaths();
+            if (paths.length === 0) return null;
+            const targetPath = edge === "first" ? paths[0] : paths[paths.length - 1];
+            return state.books.find(b => b.path === targetPath) || null;
         },
     };
 
