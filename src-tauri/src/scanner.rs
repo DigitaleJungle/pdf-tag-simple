@@ -118,13 +118,17 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
 
     for pdf_path in &physical_paths {
         let pdf_str = pdf_path.to_string_lossy().to_string();
-        let file_name = pdf_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
 
         let old = existing_map.get(&pdf_str);
+        // Giữ nguyên tên đã đổi (custom given name) — chỉ dùng tên file vật lý
+        // cho sách mới chưa từng có trong database
+        let file_name = old.map(|b| b.file_name.clone()).unwrap_or_else(|| {
+            pdf_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        });
         let tags = old.map(|b| b.tags.clone()).unwrap_or_default();
         let date_added = old
             .map(|b| if b.date_added == 0 { now_ts } else { b.date_added })

@@ -207,17 +207,17 @@ async function openBulkTagModal(paths, onSave) {
     const addBlock = document.createElement("div");
     addBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text);">Add tags to all</div>`;
 
-    const addEditor = createTagEditor(tagsToAdd, "#eef4ff", "#1d4ed8", "#cfe0ff", allTagNames);
+    const addEditor = createTagEditor(tagsToAdd, "#eef4ff", "#1d4ed8", "#cfe0ff", allTagNames, () => handleSave());
     addBlock.appendChild(addEditor.wrap);
-    addBlock.appendChild(addEditor.helper("Enter to add. These tags will be added to all selected books."));
+    addBlock.appendChild(addEditor.helper("Tab to add. Enter to apply. These tags will be added to all selected books."));
 
     // --- Remove tags section ---
     const removeBlock = document.createElement("div");
     removeBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:#c00;">Remove tags from all</div>`;
 
-    const removeEditor = createTagEditor(tagsToRemove, "#fff0f0", "#c00", "#ffd0d0", allTagNames);
+    const removeEditor = createTagEditor(tagsToRemove, "#fff0f0", "#c00", "#ffd0d0", allTagNames, () => handleSave());
     removeBlock.appendChild(removeEditor.wrap);
-    removeBlock.appendChild(removeEditor.helper("Enter to add. These tags will be removed from all selected books."));
+    removeBlock.appendChild(removeEditor.helper("Tab to add. Enter to apply. These tags will be removed from all selected books."));
 
     body.appendChild(addBlock);
     body.appendChild(removeBlock);
@@ -317,7 +317,7 @@ async function openBulkTagModal(paths, onSave) {
 
 // Helper tạo tag editor tái sử dụng được cho cả Add và Remove section
 // allTagNames: danh sách tag đã tồn tại (toàn bộ thư viện) dùng để hiện dropdown gợi ý
-function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames = []) {
+function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames = [], onEnterSubmit = null) {
     const wrap = document.createElement("div");
     wrap.style.cssText = `
         border:1px solid var(--border); border-radius:10px; padding:8px;
@@ -440,13 +440,32 @@ function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames =
     input.addEventListener("focus", updateSuggestions);
 
     input.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowDown") {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+            // Let the browser's native select-all run in this field instead
+            // of the app-wide "select all books" shortcut in main.js.
+            e.stopPropagation();
+        } else if (e.key === "ArrowDown") {
             if (matches.length) { e.preventDefault(); setHighlight((highlighted + 1) % matches.length); }
         } else if (e.key === "ArrowUp") {
             if (matches.length) { e.preventDefault(); setHighlight((highlighted - 1 + matches.length) % matches.length); }
-        } else if (e.key === "Enter" || e.key === ",") {
+        } else if (e.key === "Tab") {
+            // Tab picks the (highlighted or first) suggestion and keeps focus
+            // in the field so more tags can be typed. With no suggestions,
+            // Tab falls through to normal focus change — the blur handler
+            // below still commits any typed text as a new tag.
+            if (matches.length) {
+                e.preventDefault();
+                addTag(highlighted >= 0 && matches[highlighted] ? matches[highlighted] : matches[0]);
+            }
+        } else if (e.key === ",") {
             e.preventDefault();
             addTag(highlighted >= 0 && matches[highlighted] ? matches[highlighted] : input.value);
+        } else if (e.key === "Enter") {
+            // Enter submits the modal (like clicking Save) rather than
+            // committing a tag — use Tab or "," to add a tag instead.
+            e.preventDefault();
+            closeDropdown();
+            if (typeof onEnterSubmit === "function") onEnterSubmit();
         } else if (e.key === "Escape") {
             closeDropdown();
         } else if (e.key === "Backspace" && !input.value.trim() && tagList.length > 0) {
@@ -531,14 +550,24 @@ async function openEditModal(book, onSave) {
     nameInput.type = "text";
     nameInput.value = currentName;
     nameInput.style.cssText = "width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; outline:none; box-sizing:border-box; background:var(--panel); color:var(--text);";
+    nameInput.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+            // Let the browser's native select-all run in this field instead
+            // of the app-wide "select all books" shortcut in main.js.
+            e.stopPropagation();
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            handleSave();
+        }
+    });
     nameBlock.appendChild(nameInput);
 
     const tagBlock = document.createElement("div");
     tagBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text);">Tags</div>`;
 
-    const tagEditor = createTagEditor(currentTags, "var(--primary-soft)", "var(--primary)", "var(--primary)", allTagNames);
+    const tagEditor = createTagEditor(currentTags, "var(--primary-soft)", "var(--primary)", "var(--primary)", allTagNames, () => handleSave());
     tagBlock.appendChild(tagEditor.wrap);
-    tagBlock.appendChild(tagEditor.helper("Enter to add a tag. Backspace on empty input to remove last tag."));
+    tagBlock.appendChild(tagEditor.helper("Tab to add a tag. Enter to save. Backspace on empty input to remove last tag."));
 
     const footer = document.createElement("div");
     footer.style.cssText = "padding:14px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:var(--panel-soft);";
