@@ -273,13 +273,6 @@ a { color: var(--primary); text-decoration: none; }
   border-color: var(--border-strong);
 }
 
-/* Toggle-style toolbar buttons (e.g. click-to-open) */
-.main-toolbar button.toggle-btn.active {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
-}
-
 /* Dark mode toggle button */
 #btn-theme-toggle {
   width: 34px;
@@ -389,9 +382,19 @@ a { color: var(--primary); text-decoration: none; }
   border-color: var(--primary);
 }
 
-/* Trash button */
+/* Trash + Settings — pinned outside the scrolling sidebar-inner */
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 #btn-trash-view {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   padding: 7px 10px;
   border: 1px solid var(--border);
@@ -409,6 +412,26 @@ a { color: var(--primary); text-decoration: none; }
   background: var(--danger-soft);
   border-color: var(--danger);
   color: var(--danger);
+}
+
+#btn-settings {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+#btn-settings:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 #btn-trash-view:disabled {

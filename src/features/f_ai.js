@@ -4,7 +4,8 @@ import { api } from "./api.js";
 // f_ai.js — AI Auto-Tag feature
 //
 // Export:
-//   openAiSettings()               — mở modal settings
+//   renderAiSettingsSection(container) — render các field AI settings vào container
+//                                         (dùng trong panel "AI Settings" của Settings modal)
 //   openAiAutoTag(books, selectedBooks, currentFilterPath, allFolders, onApplied)
 //                                  — mở modal auto-tag với scope selection
 // =============================================
@@ -24,12 +25,16 @@ function estimateCost(bookCount, inputMode) {
 }
 
 // =============================================
-// AI SETTINGS MODAL
+// AI SETTINGS SECTION (rendered inside the Settings modal)
 // =============================================
-export async function openAiSettings() {
-    document.querySelectorAll(".ai-settings-overlay").forEach(el => el.remove());
+export async function renderAiSettingsSection(container, ctx = {}) {
+    const loading = document.createElement("div");
+    loading.style.cssText = "color:var(--text-secondary); font-size:13px;";
+    loading.innerText = "Loading...";
+    container.appendChild(loading);
 
     let settings = await api.getAiSettings().catch(() => ({
+        enabled: true,
         provider: "openai",
         openai_api_key: "",
         openai_model: "gpt-4o-mini",
@@ -41,23 +46,49 @@ export async function openAiSettings() {
         tag_language: "auto",
     }));
 
-    const overlay = document.createElement("div");
-    overlay.className = "ai-settings-overlay";
-    overlay.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:3000; padding:20px;";
+    loading.remove();
 
-    const modal = document.createElement("div");
-    modal.style.cssText = "width:min(600px,100%); background:var(--panel); color:var(--text); border-radius:14px; box-shadow:var(--shadow-md); overflow:hidden; font-family:inherit; max-height:90vh; display:flex; flex-direction:column; border:1px solid var(--border);";
+    // --- Activate AI ---
+    const enabledRow = document.createElement("div");
+    enabledRow.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px;";
+    enabledRow.appendChild(makeLabel("Activate AI"));
 
-    // Header
-    const header = document.createElement("div");
-    header.style.cssText = "padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;";
-    header.innerHTML = `<div style="font-size:18px;font-weight:700;color:var(--text);">AI Settings</div>`;
-    const closeBtn = makeCloseBtn(() => overlay.remove());
-    header.appendChild(closeBtn);
+    const switchLabel = document.createElement("label");
+    switchLabel.style.cssText = "position:relative; display:inline-block; width:40px; height:22px; flex-shrink:0; cursor:pointer;";
+    const enabledCheckbox = document.createElement("input");
+    enabledCheckbox.type = "checkbox";
+    enabledCheckbox.checked = settings.enabled !== false;
+    enabledCheckbox.style.cssText = "opacity:0; width:0; height:0; position:absolute;";
+    const track = document.createElement("span");
+    const thumb = document.createElement("span");
+    thumb.style.cssText = "position:absolute; top:2px; width:18px; height:18px; border-radius:50%; background:white; transition:left .15s; box-shadow:0 1px 2px rgba(0,0,0,0.3); pointer-events:none;";
+    track.appendChild(thumb);
 
-    // Body
+    function updateSwitchVisual() {
+        track.style.cssText = `position:absolute; inset:0; border-radius:999px; transition:background .15s; background:${enabledCheckbox.checked ? "var(--primary)" : "var(--border-strong)"}; pointer-events:none;`;
+        thumb.style.left = enabledCheckbox.checked ? "20px" : "2px";
+    }
+    updateSwitchVisual();
+    switchLabel.appendChild(enabledCheckbox);
+    switchLabel.appendChild(track);
+    enabledRow.appendChild(switchLabel);
+    container.appendChild(enabledRow);
+
+    // Body — tất cả các field còn lại, ẩn hết khi AI bị tắt
     const body = document.createElement("div");
-    body.style.cssText = "padding:18px; display:flex; flex-direction:column; gap:14px; overflow-y:auto;";
+    body.style.cssText = `display:${enabledCheckbox.checked ? "flex" : "none"}; flex-direction:column; gap:14px;`;
+    container.appendChild(body);
+
+    enabledCheckbox.addEventListener("change", async () => {
+        updateSwitchVisual();
+        body.style.display = enabledCheckbox.checked ? "flex" : "none";
+        if (typeof ctx.onAiEnabledChange === "function") ctx.onAiEnabledChange(enabledCheckbox.checked);
+        try {
+            await api.saveAiSettings(gatherSettings());
+        } catch (err) {
+            console.error("Error saving AI enabled state:", err);
+        }
+    });
 
     // Provider
     body.appendChild(makeLabel("Provider"));
@@ -198,14 +229,11 @@ export async function openAiSettings() {
     renderVocabChips();
     body.appendChild(vocabEditor);
 
-    // Footer
-    const footer = document.createElement("div");
-    footer.style.cssText = "padding:14px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:var(--panel-soft); flex-shrink:0;";
-    const cancelBtn = makeBtn("Cancel", false, () => overlay.remove());
-    const saveBtn = makeBtn("Save Settings", true, async () => {
+    function gatherSettings() {
         const v = vocabInput.value.trim();
         if (v && !vocabTags.includes(v)) vocabTags.push(v);
-        const newSettings = {
+        return {
+            enabled: enabledCheckbox.checked,
             provider: providerSelect.value,
             openai_api_key: apiKeyInput.value.trim(),
             openai_model: openaiModelSelect.value,
@@ -216,23 +244,26 @@ export async function openAiSettings() {
             tag_vocabulary: vocabTags,
             skip_if_tags_gte: parseInt(skipInput.value) || 5,
         };
-        try {
-            await api.saveAiSettings(newSettings);
-            overlay.remove();
-        } catch (err) { alert("Error saving settings: " + err); }
-    });
-    footer.appendChild(cancelBtn);
-    footer.appendChild(saveBtn);
+    }
 
-    modal.appendChild(header);
-    modal.appendChild(body);
-    modal.appendChild(footer);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-    document.addEventListener("keydown", function esc(e) {
-        if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
-    }, { once: true });
+    // Footer
+    const footer = document.createElement("div");
+    footer.style.cssText = "display:flex; align-items:center; gap:10px; margin-top:4px;";
+    const saveStatus = document.createElement("span");
+    saveStatus.style.cssText = "font-size:12px; color:var(--text-secondary);";
+    const saveBtn = makeBtn("Save Settings", true, async () => {
+        try {
+            await api.saveAiSettings(gatherSettings());
+            saveStatus.innerText = "Saved.";
+            saveStatus.style.color = "#2e7d32";
+        } catch (err) {
+            saveStatus.innerText = "Error saving settings: " + err;
+            saveStatus.style.color = "var(--danger)";
+        }
+    });
+    footer.appendChild(saveBtn);
+    footer.appendChild(saveStatus);
+    body.appendChild(footer);
 }
 
 // =============================================

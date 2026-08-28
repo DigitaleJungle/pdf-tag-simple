@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::create_dir_all;
 use std::io::Cursor;
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri::Emitter;
 use walkdir::WalkDir;
@@ -60,6 +60,12 @@ fn init_pdfium(app_handle: &tauri::AppHandle) -> Result<Pdfium, String> {
 }
 
 pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, String> {
+    // PERF LOGGING — "Update Database" has several distinct phases (disk walk,
+    // JSON load/write, per-PDF thumbnail render) and slowness reports could come
+    // from any of them. Timed with eprintln! (no logging crate in the project
+    // yet) so `cargo tauri dev`'s terminal shows where the time actually goes.
+    let total_start = Instant::now();
+
     let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let cache_dir = app_dir.join("cache");
     if !cache_dir.exists() {
@@ -67,10 +73,12 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
     }
 
     let folders = crate::db::get_folders_list(&app_handle);
+    eprintln!("[update_db] {} registered folder(s)", folders.len());
     let now_ts = current_timestamp();
     let book_db_path = app_dir.join("library_books.json");
 
     // Load database cũ để giữ tags, hidden, date_added
+    let load_db_start = Instant::now();
     let existing_books: Vec<BookEntry> = if book_db_path.exists() {
         let s = std::fs::read_to_string(&book_db_path).unwrap_or_default();
         serde_json::from_str::<BookDatabase>(&s)
@@ -79,6 +87,11 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
     } else {
         Vec::new()
     };
+    eprintln!(
+        "[update_db] loaded {} existing entries in {:?}",
+        existing_books.len(),
+        load_db_start.elapsed()
+    );
 
     let existing_map: HashMap<String, BookEntry> = existing_books
         .into_iter()
@@ -86,32 +99,55 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
         .collect();
 
     // Quét tất cả PDF trong các folder đã thêm
+    let walk_start = Instant::now();
     let mut physical_paths = Vec::new();
     let mut seen_paths = HashSet::new();
 
     for folder in &folders {
+        let folder_start = Instant::now();
+        let mut found_in_folder = 0;
         for entry in WalkDir::new(folder).into_iter().filter_map(|e| e.ok()) {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext.to_string_lossy().eq_ignore_ascii_case("pdf")) {
                 let path_str = path.to_string_lossy().to_string();
                 if seen_paths.insert(path_str.clone()) {
                     physical_paths.push(path.to_path_buf());
+                    found_in_folder += 1;
                 }
             }
         }
+        eprintln!(
+            "[update_db]   walked '{}': {} pdf(s) in {:?}",
+            folder,
+            found_in_folder,
+            folder_start.elapsed()
+        );
     }
+    eprintln!(
+        "[update_db] disk walk found {} pdf(s) total in {:?}",
+        physical_paths.len(),
+        walk_start.elapsed()
+    );
 
     // Xóa thumbnail của file không còn tồn tại
+    let cleanup_start = Instant::now();
     let physical_set: HashSet<String> = physical_paths
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
 
+    let mut removed_thumbs = 0;
     for old in existing_map.values() {
         if !physical_set.contains(&old.path) && !old.thumbnail_path.is_empty() {
             let _ = std::fs::remove_file(&old.thumbnail_path);
+            removed_thumbs += 1;
         }
     }
+    eprintln!(
+        "[update_db] removed {} orphaned thumbnail(s) in {:?}",
+        removed_thumbs,
+        cleanup_start.elapsed()
+    );
 
     // Build danh sách sách mới, giữ nguyên metadata cũ
     let mut final_books: Vec<BookEntry> = Vec::new();
@@ -155,17 +191,29 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
     final_books.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
 
     // Lưu database
+    let write_start = Instant::now();
     let json = serde_json::to_string_pretty(&BookDatabase {
         books: final_books.clone(),
     })
     .map_err(|e| e.to_string())?;
     std::fs::write(&book_db_path, json).map_err(|e| e.to_string())?;
+    eprintln!(
+        "[update_db] wrote database json ({} books) in {:?}",
+        final_books.len(),
+        write_start.elapsed()
+    );
 
     // =============================================
     // RENDER THUMBNAIL + EMIT PROGRESS
     // Emit event "scan_progress" sau mỗi file
     // Frontend lắng nghe để update progress bar
+    //
+    // PERF: chạy tuần tự (không rayon) và load_pdf_from_file lại từ đầu cho
+    // mỗi file — đây gần như chắc chắn là phần tốn thời gian nhất của cả quá
+    // trình update khi có nhiều PDF chưa có thumbnail, nhất là ở debug build
+    // (xem log elapsed bên dưới để xác nhận).
     // =============================================
+    let render_loop_start = Instant::now();
     let mut render_new = 0;
     let mut render_reused = 0;
     let mut render_fail = 0;
@@ -180,6 +228,11 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
         .collect();
 
     let total_new = to_render.len();
+    eprintln!(
+        "[update_db] {} pdf(s) need a new thumbnail ({} already cached)",
+        total_new,
+        physical_paths.len() - total_new
+    );
 
     // Emit event bắt đầu (để frontend hiện progress bar)
     let _ = app_handle.emit("scan_progress", ScanProgress {
@@ -217,6 +270,7 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
                 done: false,
             });
 
+            let file_start = Instant::now();
             let result: Result<(), String> = (|| {
                 let doc = pdfium
                     .load_pdf_from_file(pdf_path, None)
@@ -231,6 +285,13 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
                     .map_err(|e| e.to_string())?;
                 Ok(())
             })();
+            let file_elapsed = file_start.elapsed();
+
+            // Flag individually slow files so a handful of huge/broken PDFs
+            // can be spotted instead of just seeing a slow total.
+            if file_elapsed.as_millis() > 500 {
+                eprintln!("[update_db]   SLOW thumbnail: {} took {:?}", pdf_str, file_elapsed);
+            }
 
             match result {
                 Ok(_) => render_new += 1,
@@ -240,7 +301,23 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
                 }
             }
         }
+    } else {
+        eprintln!("[update_db] pdfium failed to initialize — no thumbnails were rendered");
     }
+
+    let render_elapsed = render_loop_start.elapsed();
+    eprintln!(
+        "[update_db] thumbnail pass done in {:?} — new: {}, reused: {}, failed: {}{}",
+        render_elapsed,
+        render_new,
+        render_reused,
+        render_fail,
+        if render_new > 0 {
+            format!(" (avg {:?}/new file)", render_elapsed / render_new as u32)
+        } else {
+            String::new()
+        }
+    );
 
     // Emit event hoàn thành
     let _ = app_handle.emit("scan_progress", ScanProgress {
@@ -249,6 +326,8 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
         file_name: "Done".to_string(),
         done: true,
     });
+
+    eprintln!("[update_db] TOTAL update_database time: {:?}", total_start.elapsed());
 
     Ok(format!(
         "Scanned {} books. New: {}, reused: {}, failed: {}.",

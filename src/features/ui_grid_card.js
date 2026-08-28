@@ -5,13 +5,15 @@ import { api } from "./api.js";
 //
 // Params:
 //   book           — BookEntry object
-//   onOpen         — callback khi double click (mở PDF)
+//   onOpen         — callback khi double click hoặc click (mở PDF trong reader)
 //   onContextMenu  — callback khi right click (context menu)
 //   isSelected     — bool, card đang được chọn không
 //   onToggleSelect — callback khi single click (toggle select)
-//   openOnClick    — bool, khi true: 1 click mở PDF ngay, double-click bị vô hiệu
+//   clickBehavior  — "select" (mặc định, click chọn/double-click mở reader) |
+//                     "open-default" (click mở bằng app mặc định của hệ thống) |
+//                     "open-reader" (click mở ngay trong reader, double-click vô hiệu)
 // =============================================
-export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, openOnClick = false) {
+export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, clickBehavior = "select") {
     const card = document.createElement("div");
 
     // Hàm apply style theo trạng thái selected/unselected
@@ -235,8 +237,12 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
 
     card.addEventListener("click", (e) => {
         if (e.defaultPrevented) return;
-        if (openOnClick) {
+        if (clickBehavior === "open-reader") {
             onOpen(book);
+            return;
+        }
+        if (clickBehavior === "open-default") {
+            window.__TAURI__.opener.openPath(book.path);
             return;
         }
         clearTimeout(clickTimer);
@@ -248,7 +254,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     });
 
     card.addEventListener("dblclick", (e) => {
-        if (openOnClick) return; // single click already opens — ignore the second click
+        if (clickBehavior !== "select") return; // single click already handles opening
         clearTimeout(clickTimer);
         onOpen(book);
     });

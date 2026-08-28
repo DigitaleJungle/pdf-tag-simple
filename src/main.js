@@ -4,8 +4,9 @@ import { renderAssetGrid, updateCardSelectionVisual, getShiftSelectRange, getBoo
 import { renderTagsUI } from "./features/f_tags.js";
 import { openEditModal } from "./features/ui_grid_menu.js";
 import { pickLibraryFolder } from "./features/f_addfolder.js";
-import { openAiSettings, openAiAutoTag } from "./features/f_ai.js";
+import { openAiAutoTag } from "./features/f_ai.js";
 import { openDuplicates } from "./features/f_duplicates.js";
+import { openSettings } from "./features/f_settings.js";
 
 // ==========================================
 // STATE
@@ -20,7 +21,7 @@ let state = {
     currentSort: "name-asc", // Kiểu sắp xếp
     viewMode: "library",     // "library" | "trash"
     selectedBooks: new Set(), // Set<path> — sách đang được multi-select
-    openOnClick: localStorage.getItem("openOnClick") === "true" // false theo mặc định
+    clickBehavior: localStorage.getItem("clickBehavior") || "select" // "select" | "open-default" | "open-reader"
 };
 window.__DEBUG_STATE__ = state;
 // ==========================================
@@ -38,19 +39,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     const sortSelect          = document.querySelector("#sort-select");
 
     // Toolbar buttons
-    const btnSelectFolder     = document.querySelector("#btn-select-folder");
     const btnUpdateDB         = document.querySelector("#btn-update-db");
-    const btnExport           = document.querySelector("#btn-export");
-    const btnImport           = document.querySelector("#btn-import");
     const btnAiAutoTag        = document.querySelector("#btn-ai-autotag");
-    const btnAiSettings       = document.querySelector("#btn-ai-settings");
     const btnFindDuplicates   = document.querySelector("#btn-find-duplicates");
     const btnThemeToggle      = document.querySelector("#btn-theme-toggle");
-    const btnToggleClickOpen  = document.querySelector("#btn-toggle-click-open");
 
     // Selection + trash buttons
     const btnTrashView        = document.querySelector("#btn-trash-view");
     const txtTrashCount       = document.querySelector("#txt-trash-count");
+    const btnSettings         = document.querySelector("#btn-settings");
     const txtSelectionCount   = document.querySelector("#txt-selection-count");
     const btnBulkHide         = document.querySelector("#btn-bulk-hide");
     const btnBulkRestore      = document.querySelector("#btn-bulk-restore");
@@ -311,6 +308,25 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
+    if (btnSettings) {
+        btnSettings.addEventListener("click", () => openSettings({
+            clickBehavior: state.clickBehavior,
+            onClickBehaviorChange: (value) => {
+                state.clickBehavior = value;
+                localStorage.setItem("clickBehavior", value);
+                updateGrid();
+            },
+            onAddPath: addPath,
+            onRemovePath: removePath,
+            getFolders: () => api.getFolders(),
+            onExport: exportBackup,
+            onImport: importBackup,
+            onAiEnabledChange: applyAiEnabledVisibility,
+            onUpdateDb: updateDatabase,
+            onFindDuplicates: () => openDuplicates(() => refreshUi()),
+        }));
+    }
+
     // ==========================================
     // SIDEBAR CALLBACKS
     // ==========================================
@@ -322,93 +338,99 @@ window.addEventListener("DOMContentLoaded", async () => {
         updateGrid();
     };
 
-    const handleDeleteFolder = async (folderPath) => {
+    const handleDeleteFolder = (folderPath) => removePath(folderPath);
+
+    async function removePath(folderPath) {
         try {
-            await api.removeFolder(folderPath);
+            const result = await api.removeFolder(folderPath);
             await refreshUi();
-            setStatus("Folder removed.", "green");
+            const removedBooks = result?.removed_books || 0;
+            setStatus(
+                removedBooks > 0
+                    ? `Path removed — ${removedBooks} book(s) removed from the library.`
+                    : "Path removed.",
+                "green"
+            );
         } catch (err) {
-            alert("Error removing folder: " + err);
+            setStatus("Error removing path: " + err, "red");
         }
-    };
+    }
 
     // ==========================================
     // TOOLBAR BUTTONS
     // ==========================================
-    if (btnSelectFolder) {
-        btnSelectFolder.addEventListener("click", async () => {
-            const folder = await pickLibraryFolder(txtStatus);
-            if (folder) {
-                try {
-                    await api.addFolder(folder);
-                    await refreshUi();
-                    setStatus(`Folder added: ${folder}`, "green");
-                } catch (err) {
-                    setStatus("Error adding folder: " + err, "red");
-                }
+    async function addPath() {
+        const folder = await pickLibraryFolder(txtStatus);
+        if (folder) {
+            try {
+                await api.addFolder(folder);
+                await refreshUi();
+                setStatus(`Folder added: ${folder}`, "green");
+            } catch (err) {
+                setStatus("Error adding folder: " + err, "red");
             }
-        });
+        }
+    }
+
+    async function updateDatabase() {
+        setStatus("Updating database...", "orange");
+        progressWrap.style.display = "";
+        progressFill.style.width = "0%";
+        progressText.innerText = "Scanning files...";
+        if (btnUpdateDB) btnUpdateDB.disabled = true;
+        try {
+            const result = await api.updateDatabase();
+            await refreshUi();
+            setStatus(result, "green");
+        } catch (err) {
+            setStatus("Error: " + err, "red");
+            progressWrap.style.display = "none";
+        } finally {
+            if (btnUpdateDB) btnUpdateDB.disabled = false;
+        }
     }
 
     if (btnUpdateDB) {
-        btnUpdateDB.addEventListener("click", async () => {
-            setStatus("Updating database...", "orange");
-            progressWrap.style.display = "";
-            progressFill.style.width = "0%";
-            progressText.innerText = "Scanning files...";
-            btnUpdateDB.disabled = true;
-            try {
-                const result = await api.updateDatabase();
+        btnUpdateDB.addEventListener("click", () => updateDatabase());
+    }
+
+    async function exportBackup() {
+        try {
+            const savePath = await window.__TAURI__.dialog.save({
+                title: "Export Database",
+                defaultPath: "pdf_library_backup.json",
+                filters: [{ name: "JSON Backup", extensions: ["json"] }]
+            });
+            if (savePath) {
+                const result = await api.exportDB(savePath);
+                setStatus(result, "green");
+                return result;
+            }
+            return null;
+        } catch (err) {
+            setStatus("Export error: " + err, "red");
+            throw err;
+        }
+    }
+
+    async function importBackup() {
+        try {
+            const srcPath = await window.__TAURI__.dialog.open({
+                title: "Import Database",
+                multiple: false,
+                filters: [{ name: "JSON Backup", extensions: ["json"] }]
+            });
+            if (srcPath) {
+                const result = await api.importDB(srcPath);
                 await refreshUi();
                 setStatus(result, "green");
-            } catch (err) {
-                setStatus("Error: " + err, "red");
-                progressWrap.style.display = "none";
-            } finally {
-                btnUpdateDB.disabled = false;
+                return result;
             }
-        });
-    }
-
-    if (btnExport) {
-        btnExport.addEventListener("click", async () => {
-            try {
-                const savePath = await window.__TAURI__.dialog.save({
-                    title: "Export Database",
-                    defaultPath: "pdf_library_backup.json",
-                    filters: [{ name: "JSON Backup", extensions: ["json"] }]
-                });
-                if (savePath) {
-                    const result = await api.exportDB(savePath);
-                    setStatus(result, "green");
-                }
-            } catch (err) {
-                setStatus("Export error: " + err, "red");
-            }
-        });
-    }
-
-    if (btnImport) {
-        btnImport.addEventListener("click", async () => {
-            try {
-                const srcPath = await window.__TAURI__.dialog.open({
-                    title: "Import Database",
-                    multiple: false,
-                    filters: [{ name: "JSON Backup", extensions: ["json"] }]
-                });
-                if (srcPath) {
-                    const result = await api.importDB(srcPath);
-                    await refreshUi();
-                    setStatus(result, "green");
-                }
-            } catch (err) {
-                setStatus("Import error: " + err, "red");
-            }
-        });
-    }
-
-    if (btnAiSettings) {
-        btnAiSettings.addEventListener("click", () => openAiSettings());
+            return null;
+        } catch (err) {
+            setStatus("Import error: " + err, "red");
+            throw err;
+        }
     }
 
     // ==========================================
@@ -435,27 +457,6 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
-    // ==========================================
-    // CLICK-TO-OPEN TOGGLE
-    // Khi bật: 1 click mở PDF ngay, chọn sách bằng click bị vô hiệu.
-    // Trạng thái lưu vào localStorage, mặc định tắt.
-    // ==========================================
-    function applyClickOpenButton() {
-        if (!btnToggleClickOpen) return;
-        btnToggleClickOpen.classList.toggle("active", state.openOnClick);
-        btnToggleClickOpen.setAttribute("aria-pressed", String(state.openOnClick));
-    }
-    applyClickOpenButton();
-
-    if (btnToggleClickOpen) {
-        btnToggleClickOpen.addEventListener("click", () => {
-            state.openOnClick = !state.openOnClick;
-            localStorage.setItem("openOnClick", String(state.openOnClick));
-            applyClickOpenButton();
-            updateGrid();
-        });
-    }
-
     if (btnFindDuplicates) {
         btnFindDuplicates.addEventListener("click", () => {
             openDuplicates(() => refreshUi());
@@ -473,6 +474,17 @@ window.addEventListener("DOMContentLoaded", async () => {
             );
         });
     }
+
+    // Nút "AI Auto-Tag" chỉ hiện khi AI được bật (toggle "Activate AI" trong AI Settings).
+    // Khi ẩn đi, "Find Duplicates" bỏ full-width để tự trôi lên chiếm chỗ của nó
+    // trong lưới 2 cột — tránh để lại 1 ô trống nhìn lệch.
+    function applyAiEnabledVisibility(enabled) {
+        if (btnAiAutoTag) btnAiAutoTag.style.display = enabled ? "" : "none";
+        if (btnFindDuplicates) btnFindDuplicates.classList.toggle("full-width", enabled);
+    }
+    api.getAiSettings()
+        .then(s => applyAiEnabledVisibility(s.enabled !== false))
+        .catch(() => {});
 
     if (searchInput) {
         searchInput.addEventListener("input", () => {
@@ -563,7 +575,7 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.viewMode,
             state.selectedBooks,
             (path, shiftKey) => toggleSelectBook(path, shiftKey),
-            state.openOnClick,
+            state.clickBehavior,
             state.untaggedOnly
         );
     }

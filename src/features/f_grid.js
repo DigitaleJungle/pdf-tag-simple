@@ -20,7 +20,7 @@ let gridState = {
 export function renderAssetGrid(
     container, books, filterPath, search, sort, selectedTags,
     onGridUpdate, viewMode = "library",
-    selectedBooks = new Set(), onToggleSelect = null, openOnClick = false,
+    selectedBooks = new Set(), onToggleSelect = null, clickBehavior = "select",
     untaggedOnly = false
 ) {
     if (observer) observer.disconnect();
@@ -41,10 +41,10 @@ export function renderAssetGrid(
         return;
     }
 
-    renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClick);
+    renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior);
 }
 
-function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClick) {
+function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior) {
     const { container, filteredBooks, displayCount, pageSize, viewMode } = gridState;
     const end = Math.min(displayCount + pageSize, filteredBooks.length);
 
@@ -58,7 +58,7 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClic
             (x, y, b) => showCardContextMenu(x, y, b, onGridUpdate, viewMode, selectedBooks),
             isSelected,
             onToggleSelect,
-            openOnClick
+            clickBehavior
         );
 
         gridState.cardMap[book.path] = card;
@@ -78,7 +78,7 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClic
 
         observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting) {
-                renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, openOnClick);
+                renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior);
             }
         }, { rootMargin: "200px" });
 

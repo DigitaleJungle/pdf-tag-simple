@@ -43,6 +43,12 @@ pub struct BookDatabase {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RemoveFolderResult {
+    pub folders: Vec<String>,  // Danh sách folder còn lại
+    pub removed_books: usize,  // Số sách đã bị xóa khỏi database vì thuộc folder này
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BackupData {
     pub version: u32,          // Phiên bản backup (để sau này nâng cấp định dạng)
     pub exported_at: i64,      // Timestamp lúc export
@@ -130,35 +136,69 @@ pub fn add_library_folder(
     Ok(db.folders)
 }
 
-// Xóa folder khỏi danh sách (không xóa file thật, chỉ bỏ theo dõi)
-// Trả về danh sách folder còn lại
+// Xóa folder khỏi danh sách theo dõi, đồng thời xóa luôn mọi sách thuộc
+// folder đó khỏi database (không xóa file PDF thật trên đĩa).
+// Trả về danh sách folder còn lại + số sách đã bị xóa.
 pub fn remove_library_folder(
     app_handle: tauri::AppHandle,
     folder_path: String,
-) -> Result<Vec<String>, String> {
-    let db_path = app_dir(&app_handle)?.join("database.json");
-    if !db_path.exists() {
-        return Ok(Vec::new());
-    }
+) -> Result<RemoveFolderResult, String> {
+    let dir = app_dir(&app_handle)?;
 
-    let mut s = String::new();
-    File::open(&db_path)
-        .map_err(|e| e.to_string())?
-        .read_to_string(&mut s)
-        .map_err(|e| e.to_string())?;
-
-    let mut db: FolderDatabase =
-        serde_json::from_str(&s).unwrap_or(FolderDatabase { folders: Vec::new() });
-
-    db.folders.retain(|f| f != &folder_path);
+    // --- Bỏ folder khỏi danh sách theo dõi ---
+    let folders_path = dir.join("database.json");
+    let mut folders: Vec<String> = if folders_path.exists() {
+        let mut s = String::new();
+        File::open(&folders_path)
+            .map_err(|e| e.to_string())?
+            .read_to_string(&mut s)
+            .map_err(|e| e.to_string())?;
+        serde_json::from_str::<FolderDatabase>(&s)
+            .unwrap_or(FolderDatabase { folders: Vec::new() })
+            .folders
+    } else {
+        Vec::new()
+    };
+    folders.retain(|f| f != &folder_path);
 
     std::fs::write(
-        &db_path,
-        serde_json::to_string_pretty(&db).map_err(|e| e.to_string())?,
+        &folders_path,
+        serde_json::to_string_pretty(&FolderDatabase { folders: folders.clone() })
+            .map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(db.folders)
+    // --- Xóa mọi sách thuộc folder này khỏi library_books.json ---
+    let books_path = dir.join("library_books.json");
+    let mut removed_books = 0usize;
+    if books_path.exists() {
+        let mut s = String::new();
+        File::open(&books_path)
+            .map_err(|e| e.to_string())?
+            .read_to_string(&mut s)
+            .map_err(|e| e.to_string())?;
+        let mut book_db: BookDatabase =
+            serde_json::from_str(&s).unwrap_or(BookDatabase { books: Vec::new() });
+
+        let normalized_folder = folder_path.replace('\\', "/");
+        let prefix = format!("{}/", normalized_folder.trim_end_matches('/'));
+        let before = book_db.books.len();
+        book_db
+            .books
+            .retain(|b| !b.path.replace('\\', "/").starts_with(&prefix));
+        removed_books = before - book_db.books.len();
+
+        std::fs::write(
+            &books_path,
+            serde_json::to_string_pretty(&book_db).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(RemoveFolderResult {
+        folders,
+        removed_books,
+    })
 }
 
 // ===== BOOKS =====

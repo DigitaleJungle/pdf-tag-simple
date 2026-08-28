@@ -21,7 +21,7 @@ fn get_library_folders(app_handle: tauri::AppHandle) -> Vec<String> {
 fn remove_library_folder(
     app_handle: tauri::AppHandle,
     folder_path: String,
-) -> Result<Vec<String>, String> {
+) -> Result<db::RemoveFolderResult, String> {
     db::remove_library_folder(app_handle, folder_path)
 }
 

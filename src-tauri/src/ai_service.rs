@@ -22,6 +22,10 @@ use tauri::Manager;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiSettings {
+    // Bật/tắt toàn bộ tính năng AI — khi false, frontend ẩn AI Settings + nút AI Auto-Tag
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+
     // Provider: "openai" | "ollama"
     pub provider: String,
 
@@ -55,10 +59,12 @@ pub struct AiSettings {
 }
 
 fn default_tag_language() -> String { "auto".to_string() }
+fn default_enabled() -> bool { true }
 
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
+            enabled: true,
             provider: "openai".to_string(),
             openai_api_key: "".to_string(),
             openai_model: "gpt-4o-mini".to_string(),
