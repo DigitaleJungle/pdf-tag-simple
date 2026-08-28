@@ -56,6 +56,16 @@ pub struct BackupData {
     pub books: Vec<BookEntry>, // Toàn bộ sách (kể cả sách hidden)
 }
 
+// Tên file backup tự động tạo bởi scanner.rs trước mỗi lần "Update DB"
+pub const AUTO_BACKUP_FILENAME: &str = "auto_backup_before_update.json";
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AutoBackupInfo {
+    pub exported_at: i64,
+    pub book_count: usize,
+    pub folder_count: usize,
+}
+
 // ===== HÀM TIỆN ÍCH NỘI BỘ =====
 
 // Trả về timestamp hiện tại (số giây từ 1970)
@@ -704,4 +714,54 @@ pub fn import_database(
         backup.books.len(),
         backup.folders.len()
     ))
+}
+
+// ===== AUTO BACKUP (trước mỗi lần "Update DB") =====
+// scanner.rs tự tạo file AUTO_BACKUP_FILENAME trước khi update, xóa lại nếu
+// thành công. Nếu app khởi động mà vẫn thấy file này còn tồn tại → update lần
+// trước có thể đã bị gián đoạn giữa chừng, hỏi user có muốn khôi phục không.
+
+// Kiểm tra có file auto-backup còn sót lại không. None = không có gì để hỏi.
+pub fn check_auto_backup(app_handle: tauri::AppHandle) -> Result<Option<AutoBackupInfo>, String> {
+    let path = app_dir(&app_handle)?.join(AUTO_BACKUP_FILENAME);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let s = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let backup: BackupData = serde_json::from_str(&s).unwrap_or(BackupData {
+        version: 1,
+        exported_at: 0,
+        folders: Vec::new(),
+        books: Vec::new(),
+    });
+
+    Ok(Some(AutoBackupInfo {
+        exported_at: backup.exported_at,
+        book_count: backup.books.len(),
+        folder_count: backup.folders.len(),
+    }))
+}
+
+// Khôi phục database từ auto-backup, rồi xóa file backup đi
+pub fn restore_auto_backup(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let path = app_dir(&app_handle)?.join(AUTO_BACKUP_FILENAME);
+    let path_str = path.to_string_lossy().to_string();
+
+    let result = import_database(app_handle, path_str)?;
+
+    if let Err(e) = std::fs::remove_file(&path) {
+        eprintln!("[auto_backup] could not remove backup after restore: {}", e);
+    }
+
+    Ok(result)
+}
+
+// Bỏ qua auto-backup — chỉ xóa file, không đụng vào database hiện tại
+pub fn discard_auto_backup(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let path = app_dir(&app_handle)?.join(AUTO_BACKUP_FILENAME);
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

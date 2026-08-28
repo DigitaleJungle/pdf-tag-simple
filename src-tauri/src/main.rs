@@ -58,6 +58,22 @@ fn import_database(app_handle: tauri::AppHandle, source_path: String) -> Result<
     db::import_database(app_handle, source_path)
 }
 
+// ===== AUTO BACKUP (an toàn trước "Update DB") =====
+#[tauri::command]
+fn check_auto_backup(app_handle: tauri::AppHandle) -> Result<Option<db::AutoBackupInfo>, String> {
+    db::check_auto_backup(app_handle)
+}
+
+#[tauri::command]
+fn restore_auto_backup(app_handle: tauri::AppHandle) -> Result<String, String> {
+    db::restore_auto_backup(app_handle)
+}
+
+#[tauri::command]
+fn discard_auto_backup(app_handle: tauri::AppHandle) -> Result<(), String> {
+    db::discard_auto_backup(app_handle)
+}
+
 #[tauri::command]
 fn update_database(app_handle: tauri::AppHandle) -> Result<String, String> {
     scanner::perform_update_database(app_handle)
@@ -206,6 +222,9 @@ fn main() {
             update_book_info,
             export_database,
             import_database,
+            check_auto_backup,
+            restore_auto_backup,
+            discard_auto_backup,
             update_database,
             get_all_tags,
             hide_book,

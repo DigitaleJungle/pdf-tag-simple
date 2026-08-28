@@ -16,6 +16,13 @@ export const api = {
     exportDB: (path) => invoke("export_database", { savePath: path }),
     importDB: (path) => invoke("import_database", { sourcePath: path }),
 
+    // Auto-backup an toàn — tạo tự động bởi backend trước mỗi lần "Update DB",
+    // xóa lại nếu update thành công. Nếu app khởi động mà vẫn thấy còn →
+    // hỏi user có muốn khôi phục không.
+    checkAutoBackup: () => invoke("check_auto_backup"),
+    restoreAutoBackup: () => invoke("restore_auto_backup"),
+    discardAutoBackup: () => invoke("discard_auto_backup"),
+
     // Thùng rác — không xóa file thật, chỉ đánh dấu hidden trong database
     hideBook: (path) => invoke("hide_book", { bookPath: path }),
     restoreBook: (path) => invoke("restore_book", { bookPath: path }),

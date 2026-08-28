@@ -72,6 +72,16 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
         create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
     }
 
+    // SAFETY BACKUP — export the current database to a JSON file in the app's
+    // own data folder before touching anything below. If the update fails
+    // partway through, this file is left behind as a recovery point; on a
+    // successful update it's deleted again. Fully automatic, no user action.
+    let auto_backup_path = app_dir.join(crate::db::AUTO_BACKUP_FILENAME);
+    crate::db::export_database(
+        app_handle.clone(),
+        auto_backup_path.to_string_lossy().to_string(),
+    )?;
+
     let folders = crate::db::get_folders_list(&app_handle);
     eprintln!("[update_db] {} registered folder(s)", folders.len());
     let now_ts = current_timestamp();
@@ -328,6 +338,11 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
     });
 
     eprintln!("[update_db] TOTAL update_database time: {:?}", total_start.elapsed());
+
+    // Update succeeded end-to-end — the safety backup is no longer needed.
+    if let Err(e) = std::fs::remove_file(&auto_backup_path) {
+        eprintln!("[update_db] could not remove auto backup file: {}", e);
+    }
 
     Ok(format!(
         "Scanned {} books. New: {}, reused: {}, failed: {}.",

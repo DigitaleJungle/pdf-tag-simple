@@ -7,6 +7,7 @@ import { pickLibraryFolder } from "./features/f_addfolder.js";
 import { openAiAutoTag } from "./features/f_ai.js";
 import { openDuplicates } from "./features/f_duplicates.js";
 import { openSettings } from "./features/f_settings.js";
+import { openAutoBackupPrompt } from "./features/f_backup_prompt.js";
 
 // ==========================================
 // STATE
@@ -618,4 +619,33 @@ window.addEventListener("DOMContentLoaded", async () => {
     // KHOI CHAY
     // ==========================================
     await refreshUi();
+
+    // Nếu còn sót file auto-backup từ lần "Update DB" trước (bị gián đoạn
+    // giữa chừng) → hỏi user có muốn khôi phục không.
+    try {
+        const backupInfo = await api.checkAutoBackup();
+        if (backupInfo) {
+            openAutoBackupPrompt(backupInfo, {
+                onRestore: async () => {
+                    try {
+                        const result = await api.restoreAutoBackup();
+                        await refreshUi();
+                        setStatus(result, "green");
+                    } catch (err) {
+                        setStatus("Error restoring backup: " + err, "red");
+                    }
+                },
+                onDiscard: async () => {
+                    try {
+                        await api.discardAutoBackup();
+                        setStatus("Backup discarded.", "gray");
+                    } catch (err) {
+                        setStatus("Error discarding backup: " + err, "red");
+                    }
+                },
+            });
+        }
+    } catch (err) {
+        console.error("Error checking auto backup:", err);
+    }
 });
