@@ -3,6 +3,7 @@
 mod db;
 mod scanner;
 mod ai_service;
+mod page_cache;
 
 #[tauri::command]
 fn add_library_folder(
@@ -209,6 +210,24 @@ fn render_pdf_page(
     scanner::render_pdf_page(&app_handle, &book_path, page_index, target_width)
 }
 
+#[tauri::command]
+fn get_page_cache_settings(app_handle: tauri::AppHandle) -> Result<page_cache::PageCacheSettings, String> {
+    page_cache::get_page_cache_settings(&app_handle)
+}
+
+#[tauri::command]
+fn save_page_cache_settings(
+    app_handle: tauri::AppHandle,
+    settings: page_cache::PageCacheSettings,
+) -> Result<String, String> {
+    page_cache::save_page_cache_settings(&app_handle, settings)
+}
+
+#[tauri::command]
+fn clear_page_cache(app_handle: tauri::AppHandle) -> Result<String, String> {
+    page_cache::clear_page_cache(&app_handle)
+}
+
 // WebView2 has its own native pinch-to-zoom (page-scale zoom) that's independent of
 // the zoomHotkeysEnabled setting and of any touch-action/preventDefault in the page's
 // JS. It fights with the reader's own finger-anchored pinch zoom (see f_reader.js),
@@ -271,7 +290,10 @@ fn main() {
             delete_tag,
             find_duplicates,
             get_pdf_page_count,
-            render_pdf_page
+            render_pdf_page,
+            get_page_cache_settings,
+            save_page_cache_settings,
+            clear_page_cache
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

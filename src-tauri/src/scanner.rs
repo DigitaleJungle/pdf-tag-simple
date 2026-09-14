@@ -428,6 +428,14 @@ pub fn render_pdf_page(
     page_index: u16,
     target_width: i32,
 ) -> Result<Vec<u8>, String> {
+    let cache_settings = crate::page_cache::get_page_cache_settings(app_handle).unwrap_or_default();
+
+    if let Some(cached) = crate::page_cache::lookup(app_handle, &cache_settings, pdf_path, page_index, target_width) {
+        if let Ok(bytes) = std::fs::read(&cached) {
+            return Ok(bytes);
+        }
+    }
+
     let pdfium = get_pdfium(app_handle)?;
     let mut cache = doc_cache().lock().map_err(|e| e.to_string())?;
     let doc = cache.get_or_load(pdfium, pdf_path)?;
@@ -441,5 +449,8 @@ pub fn render_pdf_page(
         .as_image()
         .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
         .map_err(|e| e.to_string())?;
+
+    crate::page_cache::store(app_handle, &cache_settings, pdf_path, page_index, target_width, &bytes);
+
     Ok(bytes)
 }

@@ -332,6 +332,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             onAiEnabledChange: applyAiEnabledVisibility,
             onUpdateDb: updateDatabase,
             onFindDuplicates: () => openDuplicates(() => refreshUi()),
+            getPageCacheSettings: () => api.getPageCacheSettings(),
+            onPageCacheSettingsChange: (settings) => api.savePageCacheSettings(settings),
+            onPurgePageCache: () => api.clearPageCache(),
         }));
     }
 

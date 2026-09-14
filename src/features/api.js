@@ -62,4 +62,9 @@ export const api = {
     // Render 1 trang ra JPEG bytes ở độ rộng target_width (px)
     renderPdfPage: (path, pageIndex, targetWidth) =>
         invoke("render_pdf_page", { bookPath: path, pageIndex, targetWidth }),
+
+    // Cache trên disk của các trang đã render (xem src-tauri/src/page_cache.rs)
+    getPageCacheSettings: () => invoke("get_page_cache_settings"),
+    savePageCacheSettings: (settings) => invoke("save_page_cache_settings", { settings }),
+    clearPageCache: () => invoke("clear_page_cache"),
 };

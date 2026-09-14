@@ -14,6 +14,9 @@ import { renderAiSettingsSection } from "./f_ai.js";
 //     ctx.onImport()          — gọi khi user bấm "Import Backup", trả về message hoặc null
 //     ctx.onUpdateDb()        — gọi khi user bấm "Update DB"
 //     ctx.onFindDuplicates()  — gọi khi user bấm "Find Duplicates"
+//     ctx.getPageCacheSettings()              — trả về Promise<{enabled, max_size_mb}>
+//     ctx.onPageCacheSettingsChange(settings)  — gọi khi user đổi page cache settings
+//     ctx.onPurgePageCache()                  — gọi khi user bấm "Purge cache", trả về message
 //
 // Thêm section mới: push vào SECTIONS bên dưới với { id, label, render(container, ctx) }
 // render(container, ctx) có thể là async.
@@ -222,6 +225,90 @@ async function renderGeneralSection(container, ctx) {
     clickGroup.appendChild(select);
     clickGroup.appendChild(hint);
     wrap.appendChild(clickGroup);
+
+    // --- Page cache (reader) ---
+    const cacheGroup = document.createElement("div");
+    cacheGroup.style.cssText = "display:flex; flex-direction:column; gap:8px;";
+    cacheGroup.appendChild(makeLabel("Page cache"));
+
+    let cacheSettings = { enabled: true, max_size_mb: 500 };
+    if (typeof ctx.getPageCacheSettings === "function") {
+        cacheSettings = await ctx.getPageCacheSettings().catch(() => cacheSettings);
+    }
+
+    function saveCacheSettings() {
+        if (typeof ctx.onPageCacheSettingsChange === "function") {
+            ctx.onPageCacheSettingsChange({ ...cacheSettings });
+        }
+    }
+
+    const cacheEnabledRow = document.createElement("label");
+    cacheEnabledRow.style.cssText = "display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); cursor:pointer;";
+    const cacheEnabledCheckbox = document.createElement("input");
+    cacheEnabledCheckbox.type = "checkbox";
+    cacheEnabledCheckbox.checked = cacheSettings.enabled !== false;
+    cacheEnabledRow.appendChild(cacheEnabledCheckbox);
+    cacheEnabledRow.appendChild(document.createTextNode("Cache rendered pages on disk"));
+
+    const cacheSizeRow = document.createElement("div");
+    cacheSizeRow.style.cssText = "display:flex; align-items:center; gap:8px;";
+    const cacheSizeInput = document.createElement("input");
+    cacheSizeInput.type = "number";
+    cacheSizeInput.min = "0";
+    cacheSizeInput.step = "50";
+    cacheSizeInput.value = cacheSettings.max_size_mb ?? 500;
+    cacheSizeInput.style.cssText = "width:100px; padding:7px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px; outline:none; background:var(--panel); color:var(--text);";
+    const cacheSizeLabel = document.createElement("span");
+    cacheSizeLabel.style.cssText = "font-size:12px; color:var(--text-secondary);";
+    cacheSizeLabel.innerText = "MB (0 = unlimited)";
+    cacheSizeRow.appendChild(cacheSizeInput);
+    cacheSizeRow.appendChild(cacheSizeLabel);
+
+    const purgeBtn = document.createElement("button");
+    purgeBtn.innerText = "Purge cache";
+    purgeBtn.style.cssText = "margin-left:auto; padding:7px 12px; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; cursor:pointer; font-size:12px;";
+    cacheSizeRow.appendChild(purgeBtn);
+
+    const cacheHint = document.createElement("div");
+    cacheHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    cacheHint.innerText = "Keeps rendered pages on disk so reopening a book or scrolling back to a page is instant instead of re-rendering it. Once the cap is reached, pages from the oldest PDFs (by the PDF file's own date) are removed first.";
+
+    const purgeStatus = document.createElement("div");
+    purgeStatus.style.cssText = "font-size:12px; color:var(--text-secondary);";
+
+    cacheEnabledCheckbox.addEventListener("change", () => {
+        cacheSettings.enabled = cacheEnabledCheckbox.checked;
+        saveCacheSettings();
+    });
+
+    cacheSizeInput.addEventListener("change", () => {
+        const n = Math.max(0, Math.floor(Number(cacheSizeInput.value) || 0));
+        cacheSizeInput.value = n;
+        cacheSettings.max_size_mb = n;
+        saveCacheSettings();
+    });
+
+    purgeBtn.addEventListener("click", async () => {
+        purgeBtn.disabled = true;
+        try {
+            const result = typeof ctx.onPurgePageCache === "function" ? await ctx.onPurgePageCache() : null;
+            if (result) {
+                purgeStatus.innerText = result;
+                purgeStatus.style.color = "#2e7d32";
+            }
+        } catch (err) {
+            purgeStatus.innerText = "Purge error: " + err;
+            purgeStatus.style.color = "var(--danger)";
+        } finally {
+            purgeBtn.disabled = false;
+        }
+    });
+
+    cacheGroup.appendChild(cacheEnabledRow);
+    cacheGroup.appendChild(cacheSizeRow);
+    cacheGroup.appendChild(purgeStatus);
+    cacheGroup.appendChild(cacheHint);
+    wrap.appendChild(cacheGroup);
 
     container.appendChild(wrap);
 }
