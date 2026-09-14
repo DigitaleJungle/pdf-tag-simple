@@ -200,8 +200,7 @@ export async function openReader(book) {
     const scrollArea = document.createElement("div");
     scrollArea.style.cssText = `
         flex: 1; overflow: auto;
-        display: flex; flex-direction: column; align-items: center;
-        gap: 16px; padding: 24px 16px;
+        padding: 24px 16px;
         touch-action: pan-y;
     `;
 
@@ -222,29 +221,70 @@ export async function openReader(book) {
         zoomLabel.innerText = Math.round(zoom * 100) + "%";
         const width = BASE_DISPLAY_WIDTH * zoom;
         pageEls.forEach(p => { p.container.style.width = width + "px"; });
+        // Below/at fit zoom there's no horizontal overflow to pan, so a one-finger
+        // horizontal drag is free to mean "swipe to next/prev book" (see below).
+        // Above fit zoom, that drag needs to pan the zoomed-in page instead, so let
+        // native touch scrolling handle both axes and don't treat it as a swipe.
+        scrollArea.style.touchAction = zoom > 1 ? "pan-x pan-y" : "pan-y";
     }
     applyZoom(); // show "100%" immediately instead of only after the first zoom change
+
+    // Finds the page under viewport y-coordinate `y` (or the closest one, for
+    // y above/below all pages) — used as a geometry reference for setZoom.
+    // Binary search: pages stack monotonically top-to-bottom regardless of
+    // individual (possibly not-yet-loaded) page heights, so rect.bottom is
+    // non-decreasing across pageEls — this keeps repeated calls during a
+    // pinch gesture cheap even for PDFs with hundreds of pages.
+    function pageNear(y) {
+        if (!pageEls.length) return null;
+        let lo = 0, hi = pageEls.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (y < pageEls[mid].container.getBoundingClientRect().bottom) hi = mid;
+            else lo = mid + 1;
+        }
+        return pageEls[lo];
+    }
 
     // Sets zoom while keeping the content under (anchorX, anchorY) — a point in
     // viewport/client coordinates — visually stationary on screen. Defaults to
     // the scroll area's center when no anchor is given (button/keyboard zoom).
+    //
+    // Pages are horizontally centered (margin: auto) and separated by a fixed,
+    // non-scaling margin/padding, so scroll position doesn't scale linearly
+    // with zoom — instead this measures a reference page's actual position
+    // before and after the zoom change and corrects the scroll offset by the
+    // observed delta, which works regardless of how the layout shifts things.
     function setZoom(newZoom, anchorX, anchorY) {
         newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, +newZoom.toFixed(2)));
         if (newZoom === zoom) return;
 
         const rect = scrollArea.getBoundingClientRect();
-        const pointerX = (anchorX ?? (rect.left + rect.width / 2)) - rect.left;
-        const pointerY = (anchorY ?? (rect.top + rect.height / 2)) - rect.top;
-        const contentX = scrollArea.scrollLeft + pointerX;
-        const contentY = scrollArea.scrollTop + pointerY;
+        const pointerX = anchorX ?? (rect.left + rect.width / 2);
+        const pointerY = anchorY ?? (rect.top + rect.height / 2);
         const scale = newZoom / zoom;
+
+        const ref = pageNear(pointerY);
+        if (!ref) {
+            zoom = newZoom;
+            applyZoom();
+            localStorage.setItem(ZOOM_STORAGE_KEY, zoom);
+            return;
+        }
+
+        const before = ref.container.getBoundingClientRect();
+        const dx = pointerX - before.left;
+        const dy = pointerY - before.top;
 
         zoom = newZoom;
         applyZoom();
         localStorage.setItem(ZOOM_STORAGE_KEY, zoom);
 
-        scrollArea.scrollLeft = contentX * scale - pointerX;
-        scrollArea.scrollTop = contentY * scale - pointerY;
+        const after = ref.container.getBoundingClientRect();
+        const desiredLeft = pointerX - dx * scale;
+        const desiredTop = pointerY - dy * scale;
+        scrollArea.scrollLeft += after.left - desiredLeft;
+        scrollArea.scrollTop += after.top - desiredTop;
     }
 
     function changeZoom(delta, anchorX, anchorY) {
@@ -278,10 +318,13 @@ export async function openReader(book) {
     }
 
     // --- Swipe left/right (touch) — navigate to prev/next PDF ---
-    // Tracked from the same single-finger gesture that otherwise just
-    // scrolls the page (touch-action is pan-y, so horizontal drags don't
-    // pan natively) — only the start/end points are needed, no visual
-    // feedback is drawn mid-swipe.
+    // Tracked from the same single-finger gesture that otherwise just scrolls
+    // the page (touch-action is pan-y at fit zoom, so horizontal drags don't
+    // pan natively there) — only the start/end points are needed, no visual
+    // feedback is drawn mid-swipe. Only armed at/below fit zoom (zoom <= 1):
+    // above that, the same one-finger drag is needed to pan the zoomed-in
+    // page (see applyZoom's touch-action toggle), so it must not also turn
+    // into a page-turn.
     const SWIPE_THRESHOLD = 60; // px — minimum horizontal distance to count as a swipe
     let swipeStartX = null;
     let swipeStartY = null;
@@ -291,9 +334,11 @@ export async function openReader(book) {
             pinchStartDist = touchDistance(e.touches);
             pinchStartZoom = zoom;
             swipeStartX = null; // a second finger joined — this is a pinch, not a swipe
-        } else if (e.touches.length === 1) {
+        } else if (e.touches.length === 1 && zoom <= 1) {
             swipeStartX = e.touches[0].clientX;
             swipeStartY = e.touches[0].clientY;
+        } else if (e.touches.length === 1) {
+            swipeStartX = null; // zoomed in — this drag pans the page, not a swipe
         }
     }, { passive: true });
 
@@ -634,7 +679,7 @@ export async function openReader(book) {
 
         if (!pageCount || pageCount === 0) {
             const errMsg = document.createElement("div");
-            errMsg.style.cssText = "color:var(--text-secondary); font-size:13px; padding:40px;";
+            errMsg.style.cssText = "color:var(--text-secondary); font-size:13px; padding:40px; text-align:center;";
             errMsg.innerText = "Couldn't open this PDF.";
             scrollArea.appendChild(errMsg);
             pageIndicator.innerText = "—";
@@ -644,11 +689,11 @@ export async function openReader(book) {
                 container.style.cssText = `
                     width: ${BASE_DISPLAY_WIDTH * zoom}px;
                     min-height: 300px;
+                    margin: 0 auto 16px;
                     background: var(--hover);
                     box-shadow: var(--shadow-card);
                     border-radius: 4px;
                     overflow: hidden;
-                    flex-shrink: 0;
                 `;
 
                 const img = document.createElement("img");

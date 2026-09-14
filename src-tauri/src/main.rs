@@ -209,10 +209,42 @@ fn render_pdf_page(
     scanner::render_pdf_page(&app_handle, &book_path, page_index, target_width)
 }
 
+// WebView2 has its own native pinch-to-zoom (page-scale zoom) that's independent of
+// the zoomHotkeysEnabled setting and of any touch-action/preventDefault in the page's
+// JS. It fights with the reader's own finger-anchored pinch zoom (see f_reader.js),
+// so it's disabled here, leaving pinch gestures to be handled entirely by the page.
+#[cfg(target_os = "windows")]
+fn disable_native_pinch_zoom(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings5;
+    use windows::core::Interface;
+
+    let _ = window.with_webview(|webview| {
+        unsafe {
+            if let Ok(core) = webview.controller().CoreWebView2() {
+                if let Ok(settings) = core.Settings() {
+                    if let Ok(settings5) = settings.cast::<ICoreWebView2Settings5>() {
+                        let _ = settings5.SetIsPinchZoomEnabled(false);
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|_app| {
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    disable_native_pinch_zoom(&window);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             add_library_folder,
             get_library_folders,
