@@ -140,7 +140,7 @@ function getFolderPath(filePath) {
 //   - Tags bấm Remove sẽ bị XÓA khỏi tất cả sách
 //   - Cho phép thấy rõ đang add gì, remove gì trước khi apply
 // =============================================
-async function openBulkTagModal(paths, onSave) {
+export async function openBulkTagModal(paths, onSave) {
     document.querySelectorAll(".edit-book-overlay").forEach(el => el.remove());
     document.querySelectorAll(".tag-suggest-dropdown").forEach(el => el.remove());
 

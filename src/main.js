@@ -222,6 +222,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         const count = state.selectedBooks.size;
         if (txtSelectionCount) txtSelectionCount.innerText = `${count} selected`;
 
+        // Multi-select doesn't apply in a Read Mode (click opens the PDF instead
+        // of selecting it), so hide the selection count and "Select all" there.
+        const isReadMode = state.clickBehavior !== "select";
+        if (txtSelectionCount) txtSelectionCount.style.display = isReadMode ? "none" : "";
+        if (btnSelectAll)      btnSelectAll.style.display      = isReadMode ? "none" : "";
+
         const hasSelection = count > 0;
         if (btnBulkHide)       btnBulkHide.style.display       = (hasSelection && state.viewMode === "library") ? "" : "none";
         if (btnBulkRestore)    btnBulkRestore.style.display    = (hasSelection && state.viewMode === "trash")   ? "" : "none";
@@ -315,6 +321,7 @@ window.addEventListener("DOMContentLoaded", async () => {
             onClickBehaviorChange: (value) => {
                 state.clickBehavior = value;
                 localStorage.setItem("clickBehavior", value);
+                updateSelectionUI();
                 updateGrid();
             },
             onAddPath: addPath,

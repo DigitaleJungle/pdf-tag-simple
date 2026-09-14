@@ -5,15 +5,17 @@ import { api } from "./api.js";
 //
 // Params:
 //   book           — BookEntry object
-//   onOpen         — callback khi double click hoặc click (mở PDF trong reader)
+//   onOpen         — callback khi click (mở PDF trong reader, chỉ dùng ở Read Mode)
 //   onContextMenu  — callback khi right click (context menu)
 //   isSelected     — bool, card đang được chọn không
 //   onToggleSelect — callback khi single click (toggle select)
-//   clickBehavior  — "select" (mặc định, click chọn/double-click mở reader) |
+//   clickBehavior  — "select" (mặc định, click chọn/double-click mở "Edit name & Tags") |
 //                     "open-default" (click mở bằng app mặc định của hệ thống) |
 //                     "open-reader" (click mở ngay trong reader, double-click vô hiệu)
+//   onEditBook     — callback khi double click trong Manage mode ("select") — mở
+//                    modal "Edit name & Tags" thay vì mở reader
 // =============================================
-export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, clickBehavior = "select") {
+export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, clickBehavior = "select", onEditBook = null) {
     const card = document.createElement("div");
 
     // Hàm apply style theo trạng thái selected/unselected
@@ -229,11 +231,18 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     }
 
     // --- Events ---
-    // FIX: dùng setTimeout trong click để dblclick có thể cancel kịp.
-    // Trước đây click fire ngay → toggle select, rồi dblclick fire → mở PDF.
-    // Kết quả: mở PDF nhưng card cũng bị select/deselect mỗi lần double click.
-    // 200ms đủ để browser phân biệt single vs double click trên mọi OS.
+    // Single click toggles selection after a short delay, so a following second
+    // click (the start of a double-click) can cancel it before it applies — this
+    // is what stops a double click from opening the reader/editor AND toggling
+    // selection. But that alone isn't airtight: if the user's actual double-click
+    // is slower than the delay, the first click's toggle can fire before the
+    // second click/dblclick arrives. So this also tracks whether the pending
+    // toggle already applied (pendingToggleApplied) and, if dblclick sees that
+    // it has, immediately reverses it — guaranteeing a double click never
+    // changes the selected state, no matter how slow the two clicks are.
     let clickTimer = null;
+    let pendingToggleApplied = false;
+    let pendingShiftKey = false;
 
     card.addEventListener("click", (e) => {
         if (e.defaultPrevented) return;
@@ -246,9 +255,13 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
             return;
         }
         clearTimeout(clickTimer);
+        if (e.detail > 1) return; // 2nd+ click of a multi-click — dblclick handles it
+        pendingToggleApplied = false;
+        pendingShiftKey = e.shiftKey;
         clickTimer = setTimeout(() => {
+            pendingToggleApplied = true;
             if (typeof onToggleSelect === "function") {
-                onToggleSelect(book.path, e.shiftKey);
+                onToggleSelect(book.path, pendingShiftKey);
             }
         }, 200);
     });
@@ -256,7 +269,15 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     card.addEventListener("dblclick", (e) => {
         if (clickBehavior !== "select") return; // single click already handles opening
         clearTimeout(clickTimer);
-        onOpen(book);
+        if (pendingToggleApplied) {
+            // The first click's toggle already fired — undo it so the net effect
+            // of this double click on selection is nothing.
+            pendingToggleApplied = false;
+            if (typeof onToggleSelect === "function") {
+                onToggleSelect(book.path, pendingShiftKey);
+            }
+        }
+        if (typeof onEditBook === "function") onEditBook(book);
     });
 
     card.addEventListener("contextmenu", (e) => {

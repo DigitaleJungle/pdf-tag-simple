@@ -96,9 +96,9 @@ export function openSettings(ctx = {}) {
 // SECTIONS
 // =============================================
 const CLICK_BEHAVIOR_OPTIONS = [
-    { value: "select", label: "Select", hint: "Click selects the book; double-click opens it in the reader." },
-    { value: "open-default", label: "Open PDF with default application", hint: "Click opens the PDF in your system's default PDF viewer." },
-    { value: "open-reader", label: "Open PDF with reader", hint: "Click opens the PDF directly in the built-in reader." },
+    { value: "select", label: "Manage", hint: "Click selects the book; double-click opens it in the reader." },
+    { value: "open-default", label: "Read mode + default application", hint: "Click opens the PDF in your system's default PDF viewer." },
+    { value: "open-reader", label: "Read mode + in-app reader", hint: "Click opens the PDF directly in the built-in reader." },
 ];
 
 async function renderGeneralSection(container, ctx) {
@@ -189,7 +189,7 @@ async function renderGeneralSection(container, ctx) {
     // --- Click behaviour ---
     const clickGroup = document.createElement("div");
     clickGroup.style.cssText = "display:flex; flex-direction:column; gap:8px;";
-    clickGroup.appendChild(makeLabel("Click behaviour"));
+    clickGroup.appendChild(makeLabel("Behaviour"));
 
     const current = ctx.clickBehavior || "select";
 

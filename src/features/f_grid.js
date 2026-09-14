@@ -1,5 +1,5 @@
 import { createCard } from "./ui_grid_card.js";
-import { showCardContextMenu } from "./ui_grid_menu.js";
+import { showCardContextMenu, openEditModal, openBulkTagModal } from "./ui_grid_menu.js";
 import { openReader } from "./f_reader.js";
 
 // =============================================
@@ -58,7 +58,14 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehav
             (x, y, b) => showCardContextMenu(x, y, b, onGridUpdate, viewMode, selectedBooks),
             isSelected,
             onToggleSelect,
-            clickBehavior
+            clickBehavior,
+            (editedBook) => {
+                // Double-clicking a book that's part of a multi-selection edits
+                // tags for the whole selection, matching the right-click menu.
+                const isBulk = selectedBooks.size > 1 && selectedBooks.has(editedBook.path);
+                if (isBulk) openBulkTagModal([...selectedBooks], onGridUpdate);
+                else openEditModal(editedBook, onGridUpdate);
+            }
         );
 
         gridState.cardMap[book.path] = card;
