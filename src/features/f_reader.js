@@ -259,15 +259,27 @@ export async function openReader(book, initialPage = null) {
     let objectUrls = [];
     let navigating = false;
 
+    // True when the page's full width is visible at once — both left and
+    // right edges on screen, no horizontal scrolling possible. Checked via
+    // actual layout rather than comparing the zoom number to 1, so it stays
+    // correct regardless of window size (a wide window can still show the
+    // whole page well above 100% zoom, and a narrow one may not even at
+    // 100%). Used to decide whether a one-finger horizontal drag means
+    // "swipe to the next/prev PDF" (applyZoom's touch-action toggle below,
+    // and the touchstart handler further down).
+    function pageFitsWidth() {
+        return scrollArea.scrollWidth <= scrollArea.clientWidth + 1; // +1: subpixel rounding
+    }
+
     function applyZoom() {
         zoomLabel.innerText = Math.round(zoom * 100) + "%";
         const width = BASE_DISPLAY_WIDTH * zoom;
         pageEls.forEach(p => { p.container.style.width = width + "px"; });
-        // Below/at fit zoom there's no horizontal overflow to pan, so a one-finger
-        // horizontal drag is free to mean "swipe to next/prev book" (see below).
-        // Above fit zoom, that drag needs to pan the zoomed-in page instead, so let
-        // native touch scrolling handle both axes and don't treat it as a swipe.
-        scrollArea.style.touchAction = zoom > 1 ? "pan-x pan-y" : "pan-y";
+        // While both edges are visible, a one-finger horizontal drag is free to
+        // mean "swipe to next/prev book" (see below). Once zoomed in far enough
+        // that they can't both be on screen, that same drag needs to pan the
+        // page instead, so let native touch scrolling handle both axes.
+        scrollArea.style.touchAction = pageFitsWidth() ? "pan-y" : "pan-x pan-y";
     }
     applyZoom(); // show "100%" immediately instead of only after the first zoom change
 
@@ -361,11 +373,12 @@ export async function openReader(book, initialPage = null) {
 
     // --- Swipe left/right (touch) — navigate to prev/next PDF ---
     // Tracked from the same single-finger gesture that otherwise just scrolls
-    // the page (touch-action is pan-y at fit zoom, so horizontal drags don't
-    // pan natively there) — only the start/end points are needed, no visual
-    // feedback is drawn mid-swipe. Only armed at/below fit zoom (zoom <= 1):
-    // above that, the same one-finger drag is needed to pan the zoomed-in
-    // page (see applyZoom's touch-action toggle), so it must not also turn
+    // the page (touch-action is pan-y while both edges fit on screen, so
+    // horizontal drags don't pan natively there) — only the start/end points
+    // are needed, no visual feedback is drawn mid-swipe. Only armed while
+    // pageFitsWidth() — once zoomed in far enough that both edges can't be on
+    // screen at once, the same one-finger drag is needed to pan the page
+    // instead (see applyZoom's touch-action toggle), so it must not also turn
     // into a page-turn.
     const SWIPE_THRESHOLD = 60; // px — minimum horizontal distance to count as a swipe
     let swipeStartX = null;
@@ -376,11 +389,11 @@ export async function openReader(book, initialPage = null) {
             pinchStartDist = touchDistance(e.touches);
             pinchStartZoom = zoom;
             swipeStartX = null; // a second finger joined — this is a pinch, not a swipe
-        } else if (e.touches.length === 1 && zoom <= 1) {
+        } else if (e.touches.length === 1 && pageFitsWidth()) {
             swipeStartX = e.touches[0].clientX;
             swipeStartY = e.touches[0].clientY;
         } else if (e.touches.length === 1) {
-            swipeStartX = null; // zoomed in — this drag pans the page, not a swipe
+            swipeStartX = null; // zoomed in past fit — this drag pans the page, not a swipe
         }
     }, { passive: true });
 
@@ -447,7 +460,12 @@ export async function openReader(book, initialPage = null) {
     lastBtn.onclick = () => goToBoundary("last");
 
     // --- "More actions" menu ---
-    function showReaderMenu() {
+    // anchor — {left, right, bottom}, in viewport coordinates. Defaults to
+    // menuBtn's own position (the ⋮ button); right-click anywhere else in the
+    // reader opens the exact same menu anchored at the cursor instead (see
+    // the "contextmenu" listener below) — one menu, two ways to reach it,
+    // rather than right-click showing a different/stale set of actions.
+    function showReaderMenu(anchor) {
         document.querySelectorAll(".reader-menu").forEach(m => m.remove());
 
         const menu = document.createElement("div");
@@ -459,6 +477,17 @@ export async function openReader(book, initialPage = null) {
         `;
 
         const items = [
+            // Same gating as the toolbar's own bookmark button — bookmarking
+            // only means anything for a session that's actually being
+            // tracked (Read Mode "open-reader").
+            ...(isReadModeActive() ? [{
+                label: isBookmarked(currentBook.path) ? "Remove bookmark" : "Bookmark",
+                action: () => {
+                    saveLastRead(); // flush the current position first, then pin it
+                    toggleBookmark(currentBook.path);
+                    updateBookmarkBtn();
+                }
+            }] : []),
             {
                 label: "Open in default app",
                 action: async () => await window.__TAURI__.opener.openPath(currentBook.path)
@@ -497,11 +526,11 @@ export async function openReader(book, initialPage = null) {
 
         document.body.appendChild(menu);
 
-        const btnRect = menuBtn.getBoundingClientRect();
-        menu.style.top = (btnRect.bottom + 4) + "px";
-        menu.style.left = btnRect.left + "px";
+        const a = anchor || menuBtn.getBoundingClientRect();
+        menu.style.top = (a.bottom + 4) + "px";
+        menu.style.left = a.left + "px";
         const rect = menu.getBoundingClientRect();
-        if (rect.right > window.innerWidth) menu.style.left = (btnRect.right - rect.width) + "px";
+        if (rect.right > window.innerWidth) menu.style.left = (a.right - rect.width) + "px";
 
         setTimeout(() => {
             document.addEventListener("click", () => menu.remove(), { once: true });
@@ -512,6 +541,16 @@ export async function openReader(book, initialPage = null) {
         e.stopPropagation();
         showReaderMenu();
     };
+
+    // Right-click anywhere in the reader opens the same "more actions" menu
+    // instead of the WebView's default context menu (Back/Reload/Inspect —
+    // out of place in a desktop reader). Left alone on actual text inputs
+    // (currently just the page-jump field) so copy/paste there still works.
+    overlay.addEventListener("contextmenu", (e) => {
+        if (e.target.closest("input, textarea")) return;
+        e.preventDefault();
+        showReaderMenu({ left: e.clientX, right: e.clientX, bottom: e.clientY });
+    });
 
     async function loadPage(entry) {
         if (entry.loaded || entry.requested) return;
