@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { saveEntry, toggleBookmark, isBookmarked } from "./f_reading_history.js";
 
 // =============================================
 // f_reader.js — In-app PDF reader
@@ -12,6 +13,14 @@ import { api } from "./api.js";
 // keyboard, swipe) reuses that shell and just reloads the scroll area's
 // content (see loadBook), so only the PDF content animates, not the
 // whole reader chrome.
+//
+// "Continue reading": the current book+page is saved via f_reading_history.js
+// (shared with main.js's dropdown/button), but only while Read Mode
+// "open-reader" is active — read via the same "clickBehavior" localStorage
+// key main.js writes on every settings change (no import needed, same
+// pattern zoom already uses). The toolbar's own bookmark button is gated the
+// same way, so it's never shown for a session that was never being tracked
+// in the first place.
 // =============================================
 
 const RENDER_WIDTH = 1600;     // px — backend rasterizes each page at this width
@@ -20,6 +29,11 @@ const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 0.1;
 const ZOOM_STORAGE_KEY = "pdfReaderZoom";
+const SAVE_LAST_READ_DEBOUNCE_MS = 400;
+
+function isReadModeActive() {
+    return localStorage.getItem("clickBehavior") === "open-reader";
+}
 
 function loadStoredZoom() {
     const stored = parseFloat(localStorage.getItem(ZOOM_STORAGE_KEY));
@@ -73,11 +87,14 @@ async function prefetchBook(path) {
 
 let currentSession = null;
 
-export async function openReader(book) {
+// initialPage (1-indexed, matching the page indicator) — jumps straight to
+// that page once the book loads, for "Continue reading" (main.js). Omit for
+// a normal open, which starts at page 1 as before.
+export async function openReader(book, initialPage = null) {
     // Already open — reuse the shell and just swap its content instead of
     // tearing down and rebuilding the whole reader.
     if (currentSession) {
-        currentSession.loadBook(book, 0);
+        currentSession.loadBook(book, 0, initialPage);
         return;
     }
 
@@ -188,6 +205,31 @@ export async function openReader(book) {
     const menuBtn = toolbarIconButton("⋮", "16px");
     menuBtn.title = "More actions";
 
+    // Bookmarks this book+page into the "Continue reading" history — same
+    // action as the bookmark icon on a row in main.js's dropdown, and the two
+    // stay in sync since both go through f_reading_history.js. Only shown
+    // when this session is actually being tracked (Read Mode "open-reader"),
+    // same gating as the rest of "Continue reading".
+    const bookmarkBtn = toolbarIconButton("🔖");
+    bookmarkBtn.style.display = "none"; // until updateBookmarkBtn() below knows the real state
+    function updateBookmarkBtn() {
+        if (!isReadModeActive() || !currentBook) {
+            bookmarkBtn.style.display = "none";
+            return;
+        }
+        bookmarkBtn.style.display = "";
+        const bookmarked = isBookmarked(currentBook.path);
+        bookmarkBtn.style.opacity = bookmarked ? "1" : "0.35";
+        bookmarkBtn.title = bookmarked ? "Remove bookmark" : "Bookmark this page";
+    }
+    bookmarkBtn.addEventListener("click", () => {
+        if (!currentBook) return;
+        saveLastRead(); // flush the current position first, then pin it
+        toggleBookmark(currentBook.path);
+        updateBookmarkBtn();
+    });
+
+    rightGroup.appendChild(bookmarkBtn);
     rightGroup.appendChild(pageIndicator);
     rightGroup.appendChild(zoomWrap);
     rightGroup.appendChild(menuBtn);
@@ -507,14 +549,30 @@ export async function openReader(book) {
         }
         currentPageNum = current;
         pageIndicator.innerText = `${current} / ${pageEls.length}`;
+        scheduleSaveLastRead();
     }
 
     scrollArea.addEventListener("scroll", updatePageIndicator);
 
-    function goToPage(n) {
+    function goToPage(n, behavior = "smooth") {
         const entry = pageEls[n - 1];
         if (!entry) return;
-        entry.container.scrollIntoView({ behavior: "smooth", block: "start" });
+        entry.container.scrollIntoView({ behavior, block: "start" });
+    }
+
+    // --- "Continue reading" position (see module header comment) ---
+    let saveLastReadTimer = null;
+
+    function scheduleSaveLastRead() {
+        clearTimeout(saveLastReadTimer);
+        saveLastReadTimer = setTimeout(saveLastRead, SAVE_LAST_READ_DEBOUNCE_MS);
+    }
+
+    function saveLastRead() {
+        clearTimeout(saveLastReadTimer);
+        if (!isReadModeActive()) return;
+        if (!currentBook || !pageEls.length) return;
+        saveEntry(currentBook.path, currentPageNum);
     }
 
     // --- Click the page indicator to jump straight to a page ---
@@ -609,23 +667,30 @@ export async function openReader(book) {
     function close() {
         if (closed) return;
         closed = true;
+        saveLastRead(); // flush immediately — don't wait on the debounce timer
         if (observer) observer.disconnect();
         objectUrls.forEach(u => URL.revokeObjectURL(u));
         document.removeEventListener("keydown", onKeydown, true);
         document.removeEventListener("mouseup", onMouseUp, true);
+        window.removeEventListener("beforeunload", saveLastRead);
         overlay.remove();
         if (currentSession === session) currentSession = null;
+        window.__APP_ACTIONS__?.onReaderClosed?.();
     }
 
     backBtn.onclick = close;
     document.addEventListener("keydown", onKeydown, true);
     document.addEventListener("mouseup", onMouseUp, true);
+    // Safety net for the window being closed outright (OS close button) rather
+    // than via the in-app Back button — localStorage.setItem is synchronous,
+    // so this reliably captures the position even during shutdown.
+    window.addEventListener("beforeunload", saveLastRead);
 
     // Loads a PDF into the (already-mounted) reader shell. Reused for the
     // initial open (direction 0, no animation) and for prev/next navigation
     // (direction ±1 — animates the scroll area's content sliding out and the
     // new content sliding in, while the toolbar/overlay stay put).
-    async function loadBook(newBook, direction = 0) {
+    async function loadBook(newBook, direction = 0, initialPage = null) {
         navigating = true;
 
         if (observer) observer.disconnect();
@@ -645,6 +710,7 @@ export async function openReader(book) {
         title.innerText = newBook.file_name;
         title.title = newBook.path;
         updateNavButtons();
+        updateBookmarkBtn();
 
         scrollArea.innerHTML = "";
         scrollArea.scrollTop = 0;
@@ -718,10 +784,18 @@ export async function openReader(book) {
             }, { root: scrollArea, rootMargin: "600px 0px" });
 
             pageEls.forEach(p => observer.observe(p.container));
+
+            if (initialPage) {
+                // "auto" (instant) rather than "smooth" — for a resumed position
+                // this can be a long jump, and animating over dozens of unloaded
+                // placeholder pages would look broken rather than smooth.
+                goToPage(Math.min(Math.max(initialPage, 1), pageEls.length), "auto");
+            }
         }
 
         revealScrollArea();
         navigating = false;
+        saveLastRead();
 
         // Prefetch adjacent books, well after this one's own pages are underway.
         // A flat delay is enough to let the current document's requests reach
@@ -738,5 +812,5 @@ export async function openReader(book) {
     const session = { close, loadBook };
     currentSession = session;
 
-    await loadBook(book, 0);
+    await loadBook(book, 0, initialPage);
 }

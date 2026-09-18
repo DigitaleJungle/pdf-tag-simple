@@ -94,6 +94,14 @@
       <!-- Top toolbar -->
       <div class="main-toolbar">
 
+        <!-- "Continue reading" — only shown in Read Mode "open-reader" when there's a
+             saved position (see main.js updateJumpLastButton / f_reader.js LAST_READ_KEY).
+             The arrow opens a dropdown with the last up-to-3 books read. -->
+        <div style="display:flex; flex-shrink:0;">
+          <button id="btn-jump-last" style="display:none; white-space:nowrap; flex-shrink:0; border-top-right-radius:0; border-bottom-right-radius:0;">↻ Continue reading</button>
+          <button id="btn-jump-last-arrow" title="Recently read" style="display:none; flex-shrink:0; padding:0 6px; border-left:none; border-top-left-radius:0; border-bottom-left-radius:0;">▾</button>
+        </div>
+
         <!-- Search -->
         <input id="search-input" placeholder="Search books..." style="flex:1; min-width:180px;" />
 

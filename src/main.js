@@ -8,6 +8,8 @@ import { openAiAutoTag } from "./features/f_ai.js";
 import { openDuplicates } from "./features/f_duplicates.js";
 import { openSettings } from "./features/f_settings.js";
 import { openAutoBackupPrompt } from "./features/f_backup_prompt.js";
+import { openReader } from "./features/f_reader.js";
+import { readList, toggleBookmark, writeCurrentFilters } from "./features/f_reading_history.js";
 
 // ==========================================
 // STATE
@@ -54,6 +56,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const btnBulkRestore      = document.querySelector("#btn-bulk-restore");
     const btnClearSelection   = document.querySelector("#btn-clear-selection");
     const btnSelectAll        = document.querySelector("#btn-select-all");
+    const btnJumpLast         = document.querySelector("#btn-jump-last");
+    const btnJumpLastArrow    = document.querySelector("#btn-jump-last-arrow");
 
     // Progress bar elements (trong #txt-status area)
     // Tạo sẵn 1 lần, ẩn đi, chỉ hiện khi đang scan
@@ -170,6 +174,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             const targetPath = edge === "first" ? paths[0] : paths[paths.length - 1];
             return state.books.find(b => b.path === targetPath) || null;
         },
+        // Gọi từ f_reader.js khi reader đóng — refresh label/visibility của nút
+        // "Continue reading" (nó có thể đã lưu 1 vị trí mới trong lúc đọc).
+        onReaderClosed: () => updateJumpLastButton(),
     };
 
     // ==========================================
@@ -589,6 +596,209 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.clickBehavior,
             state.untaggedOnly
         );
+
+        persistLastFilters();
+        updateJumpLastButton();
+    }
+
+    // Mirrors the live filter state to localStorage on every grid re-render so
+    // f_reader.js can snapshot "what was I looking at" into its own saved
+    // reading position without importing main.js — see f_reading_history.js.
+    function persistLastFilters() {
+        writeCurrentFilters({
+            currentFilterPath: state.currentFilterPath,
+            currentSearch: state.currentSearch,
+            currentSort: state.currentSort,
+            selectedTags: state.selectedTags,
+            untaggedOnly: state.untaggedOnly,
+        });
+    }
+
+    function findBookByPath(path) {
+        return state.books.find(b => b.path === path && !b.hidden) || null;
+    }
+
+    // The saved entries whose book still exists and isn't hidden/trashed —
+    // what's actually offered, in {entry, book} pairs, most-recent first.
+    function validLastReadEntries() {
+        return readList()
+            .map(entry => ({ entry, book: findBookByPath(entry.path) }))
+            .filter(x => x.book);
+    }
+
+    // Only offered in Read Mode "open-reader" (per the feature's own scope —
+    // multi-select/Manage mode has no use for a reading-position shortcut).
+    function updateJumpLastButton() {
+        closeJumpLastDropdown(); // contents may be stale after this refresh
+        if (!btnJumpLast) return;
+        const entries = validLastReadEntries();
+        const show = state.clickBehavior === "open-reader" && entries.length > 0;
+        btnJumpLast.style.display = show ? "" : "none";
+        if (btnJumpLastArrow) btnJumpLastArrow.style.display = show ? "" : "none";
+        if (show) {
+            const { entry, book } = entries[0];
+            btnJumpLast.title = `Continue reading "${book.file_name}" — page ${entry.page}`;
+        }
+    }
+
+    // Marks the matching sidebar folder item active without a full sidebar
+    // re-render — mirrors the data-path convention set in f_sidebar.js.
+    function highlightActiveFolder(path) {
+        if (!sidebarContainer) return;
+        const target = path === null ? "all" : path;
+        sidebarContainer.querySelectorAll(".sidebar-item").forEach(item => {
+            item.classList.toggle("active", item.dataset.path === target);
+        });
+    }
+
+    // Restores a saved entry's filters and opens the reader at its page —
+    // shared by the main button (most recent) and each dropdown row (any of
+    // the last few).
+    function jumpToEntry(entry, book) {
+        if (state.viewMode === "trash") switchToLibrary();
+
+        const f = entry.filters || {};
+        state.currentFilterPath = f.currentFilterPath ?? null;
+        state.currentSearch = f.currentSearch ?? "";
+        state.currentSort = f.currentSort ?? "name-asc";
+        state.selectedTags = Array.isArray(f.selectedTags) ? f.selectedTags : [];
+        state.untaggedOnly = !!f.untaggedOnly;
+        state.selectedBooks.clear();
+
+        if (searchInput) searchInput.value = state.currentSearch;
+        if (sortSelect) sortSelect.value = state.currentSort;
+        highlightActiveFolder(state.currentFilterPath);
+        renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
+            handleTagSelectionChange, handleTagRenamed, handleTagDeleted,
+            state.untaggedOnly, handleUntaggedToggle);
+        updateSelectionUI();
+        updateGrid();
+
+        openReader(book, entry.page);
+    }
+
+    if (btnJumpLast) {
+        btnJumpLast.addEventListener("click", () => {
+            closeJumpLastDropdown();
+            const entries = validLastReadEntries();
+            if (!entries.length) {
+                updateJumpLastButton(); // saved book(s) gone — hide and bail
+                return;
+            }
+            jumpToEntry(entries[0].entry, entries[0].book);
+        });
+    }
+
+    // ==========================================
+    // "Continue reading" dropdown — last up-to-3 distinct books, each
+    // showing its page and (if any were active for that session) its tags.
+    // ==========================================
+    let jumpLastDropdownEl = null;
+
+    function closeJumpLastDropdown() {
+        if (!jumpLastDropdownEl) return;
+        jumpLastDropdownEl.remove();
+        jumpLastDropdownEl = null;
+        document.removeEventListener("mousedown", onJumpLastDropdownOutsideClick, true);
+        document.removeEventListener("keydown", onJumpLastDropdownEscape, true);
+    }
+
+    function onJumpLastDropdownOutsideClick(e) {
+        if (jumpLastDropdownEl && !jumpLastDropdownEl.contains(e.target) && e.target !== btnJumpLastArrow) {
+            closeJumpLastDropdown();
+        }
+    }
+
+    function onJumpLastDropdownEscape(e) {
+        if (e.key === "Escape") closeJumpLastDropdown();
+    }
+
+    function openJumpLastDropdown() {
+        closeJumpLastDropdown();
+        const entries = validLastReadEntries();
+        if (!entries.length || !btnJumpLastArrow) return;
+
+        const panel = document.createElement("div");
+        panel.className = "context-menu"; // reuse the existing popover look
+        const rect = btnJumpLastArrow.getBoundingClientRect();
+        panel.style.cssText = `
+            position: fixed;
+            top: ${rect.bottom + 4}px;
+            left: ${rect.left}px;
+            min-width: 220px;
+            max-width: 320px;
+            z-index: 10000;
+        `;
+
+        entries.forEach(({ entry, book }) => {
+            const row = document.createElement("div");
+            row.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px; cursor:pointer;";
+            row.addEventListener("mouseenter", () => row.style.background = "var(--hover)");
+            row.addEventListener("mouseleave", () => row.style.background = "transparent");
+
+            const textCol = document.createElement("div");
+            textCol.style.cssText = "flex:1; min-width:0;";
+
+            const titleEl = document.createElement("div");
+            titleEl.style.cssText = "font-size:13px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+            titleEl.innerText = `${book.file_name} — p.${entry.page}`;
+            textCol.appendChild(titleEl);
+
+            const tags = entry.filters?.selectedTags;
+            if (Array.isArray(tags) && tags.length > 0) {
+                const tagsEl = document.createElement("div");
+                tagsEl.style.cssText = "font-size:11px; color:var(--text-secondary); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+                tagsEl.innerText = tags.join(", ");
+                textCol.appendChild(tagsEl);
+            }
+
+            row.appendChild(textCol);
+
+            // Pins this session so it's kept regardless of the normal
+            // "last 3" rotation — same action as the reader toolbar's own
+            // bookmark button (both go through f_reading_history.js).
+            const bookmarkBtn = document.createElement("span");
+            bookmarkBtn.innerText = "🔖";
+            bookmarkBtn.title = entry.bookmarked ? "Remove bookmark" : "Bookmark this session";
+            bookmarkBtn.style.cssText = `flex-shrink:0; cursor:pointer; font-size:14px; line-height:1; opacity:${entry.bookmarked ? "1" : "0.3"};`;
+            bookmarkBtn.addEventListener("click", (e) => {
+                e.stopPropagation(); // don't also trigger the row's own jump-to click below
+                toggleBookmark(entry.path);
+                // Rebuild in place — simplest way to keep every row's icon
+                // state and the button's own visibility/title all consistent.
+                updateJumpLastButton();
+                if (validLastReadEntries().length > 0) openJumpLastDropdown();
+            });
+            row.appendChild(bookmarkBtn);
+
+            row.addEventListener("click", () => {
+                closeJumpLastDropdown();
+                jumpToEntry(entry, book);
+            });
+
+            panel.appendChild(row);
+        });
+
+        document.body.appendChild(panel);
+        jumpLastDropdownEl = panel;
+
+        // Safe to attach immediately (no defer needed): mousedown always fires
+        // before the click that opened this dropdown, so this can't catch that
+        // same click. Deferring it was actually a latent listener leak — if
+        // something else called closeJumpLastDropdown() in between a deferred
+        // attach and its scheduled run, the attach would still fire afterward
+        // with jumpLastDropdownEl already null, leaving these listeners with
+        // nothing left to ever remove them.
+        document.addEventListener("mousedown", onJumpLastDropdownOutsideClick, true);
+        document.addEventListener("keydown", onJumpLastDropdownEscape, true);
+    }
+
+    if (btnJumpLastArrow) {
+        btnJumpLastArrow.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (jumpLastDropdownEl) closeJumpLastDropdown();
+            else openJumpLastDropdown();
+        });
     }
 
     function setStatus(msg, color = "inherit") {
