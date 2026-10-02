@@ -74,6 +74,16 @@ pub struct AiSettings {
     // "vi"   — luôn tag tiếng Việt
     #[serde(default = "default_tag_language")]
     pub tag_language: String,
+
+    // Prompt soạn sẵn — chọn trong modal AI auto làm "Extra instructions"
+    #[serde(default)]
+    pub saved_prompts: Vec<SavedPrompt>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SavedPrompt {
+    pub name: String,
+    pub text: String,
 }
 
 fn default_tag_language() -> String { "auto".to_string() }
@@ -97,6 +107,7 @@ impl Default for AiSettings {
             skip_if_tags_gte: 5,
             max_tags: default_max_tags(),
             tag_language: "auto".to_string(),
+            saved_prompts: Vec::new(),
         }
     }
 }
@@ -118,7 +129,47 @@ pub struct AiTagSuggestion {
     pub path: String,
     pub file_name: String,
     pub suggested_tags: Vec<String>,
+    #[serde(default)]
+    pub short_description: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
     pub error: Option<String>,  // Nếu có lỗi khi tag sách này
+}
+
+impl AiTagSuggestion {
+    fn failed(path: String, file_name: String, error: String) -> Self {
+        Self { path, file_name, suggested_tags: Vec::new(), short_description: None, description: None, error: Some(error) }
+    }
+}
+
+// Những gì user muốn AI điền (checkbox trong modal AI)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AiFillOptions {
+    #[serde(default = "default_true")]
+    pub tags: bool,
+    #[serde(default)]
+    pub short_description: bool,
+    #[serde(default)]
+    pub description: bool,
+    // Hướng dẫn thêm cho lần chạy này (từ prompt soạn sẵn hoặc tự gõ) — rỗng = không gửi
+    #[serde(default)]
+    pub extra_prompt: String,
+}
+
+fn default_true() -> bool { true }
+
+// Những phần cần điền cho 1 sách cụ thể (tags bị bỏ nếu sách đã đủ tags)
+#[derive(Debug, Clone, Copy)]
+struct Wanted {
+    tags: bool,
+    short_description: bool,
+    description: bool,
+}
+
+impl Wanted {
+    fn any_text(&self) -> bool {
+        self.short_description || self.description
+    }
 }
 
 // ===== SETTINGS I/O =====
@@ -152,55 +203,136 @@ pub fn save_ai_settings(
 
 // ===== PROMPT BUILDER =====
 
-fn build_prompt(file_name: &str, vocabulary: &[String], tag_language: &str, max_tags: u32, image_note: &str) -> String {
-    let count = if max_tags <= 1 {
-        "exactly 1 tag".to_string()
-    } else {
-        format!("{}-{} tags", max_tags.min(2), max_tags)
+fn build_prompt(
+    file_name: &str,
+    vocabulary: &[String],
+    tag_language: &str,
+    max_tags: u32,
+    image_note: &str,
+    want: Wanted,
+    extra_prompt: &str,
+) -> String {
+    let language = match tag_language {
+        "en" => "English",
+        "vi" => "Vietnamese",
+        "zh" => "Chinese (Simplified)",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "es" => "Spanish",
+        "fr" => "French",
+        "de" => "German",
+        "id" => "Indonesian",
+        _ => "",
     };
-    let vocab_instruction = if vocabulary.is_empty() {
-        format!("Suggest {} (short and relevant).", count)
+    let subject = match (want.tags, want.any_text()) {
+        (true, true) => "All tags and descriptions",
+        (false, true) => "All descriptions",
+        _ => "All tags",
+    };
+    let language_rule = if language.is_empty() {
+        "Use the same language as the filename.".to_string()
+    } else {
+        format!("{} must be in {}.", subject, language)
+    };
+
+    let mut tasks: Vec<String> = Vec::new();
+    let mut rules: Vec<String> = Vec::new();
+
+    if want.tags {
+        let count = if max_tags <= 1 {
+            "exactly 1 tag".to_string()
+        } else {
+            format!("{}-{} tags", max_tags.min(2), max_tags)
+        };
+        tasks.push(if vocabulary.is_empty() {
+            format!("Suggest {} (short and relevant).", count)
+        } else {
+            format!(
+                "Preferred tag list: [{}]. \
+                Use tags from this list when they fit. \
+                You may add tags outside the list only if nothing in the list is a good match. \
+                Suggest {} total.",
+                vocabulary.join(", "),
+                count
+            )
+        });
+        rules.push("- Tags must be short (1-3 words max)".to_string());
+        rules.push("- No duplicates".to_string());
+        rules.push(
+            "- Series rule: if the filename clearly belongs to a named series followed by a number or volume \
+            (e.g. \"My Pals Are Here 3\", \"DK Eyewitness Travel Paris\", \"Goosebumps 12\"), \
+            add the series name as a tag WITHOUT the number (e.g. \"My Pals Are Here\", \"DK Eyewitness Travel\"). \
+            Do NOT create series tags for standalone books (e.g. \"Nguyen Van 6\", \"Toan 7\") \
+            where the number is just a grade level, not a volume in a named series."
+                .to_string(),
+        );
+    }
+    if want.short_description {
+        tasks.push("Write a short description: one sentence (at most about 150 characters) saying what the book is.".to_string());
+    }
+    if want.description {
+        tasks.push("Write a longer description: one paragraph of 3-6 sentences about the book's subject, contents and intended reader.".to_string());
+    }
+    if want.any_text() {
+        let source = if image_note.is_empty() { "the filename" } else { "the filename and the attached images" };
+        rules.push(format!(
+            "- Descriptions: only state what you can tell from {}. Don't invent specific details such as authors, dates or plot points. If the content is unclear, keep it general.",
+            source
+        ));
+    }
+
+    // Chỉ tags → giữ định dạng JSON array như trước; có description → JSON object
+    let output = if want.any_text() {
+        let mut keys: Vec<&str> = Vec::new();
+        let mut example = serde_json::Map::new();
+        if want.tags {
+            keys.push("\"tags\" (array of strings)");
+            example.insert("tags".into(), serde_json::json!(["self-help", "productivity"]));
+        }
+        if want.short_description {
+            keys.push("\"short_description\" (string)");
+            example.insert("short_description".into(), serde_json::json!("A practical guide to building better daily habits."));
+        }
+        if want.description {
+            keys.push("\"description\" (string)");
+            example.insert(
+                "description".into(),
+                serde_json::json!("This book explains how small daily habits add up over time. It covers ways to start, keep and track new routines. It is written for readers who want practical steps rather than theory."),
+            );
+        }
+        format!(
+            "- Respond with ONLY a JSON object with these keys, nothing else: {}.\nExample response: {}",
+            keys.join(", "),
+            serde_json::Value::Object(example)
+        )
+    } else {
+        "- Respond with ONLY a JSON array of strings, nothing else.\n\
+        Example response: [\"self-help\", \"productivity\", \"My Pals Are Here\"]"
+            .to_string()
+    };
+
+    // Hướng dẫn của user đặt trước phần định dạng trả lời, để không làm hỏng JSON
+    let extra = extra_prompt.trim();
+    let extra_block = if extra.is_empty() {
+        String::new()
     } else {
         format!(
-            "Preferred tag list: [{}]. \
-            Use tags from this list when they fit. \
-            You may add tags outside the list only if nothing in the list is a good match. \
-            Suggest {} total.",
-            vocabulary.join(", "),
-            count
+            "Additional instructions from the user (follow them, but keep the response format below):\n{}\n",
+            extra
         )
     };
 
-    let language_instruction = match tag_language {
-        "en" => "All tags must be in English.",
-        "vi" => "All tags must be in Vietnamese.",
-        "zh" => "All tags must be in Chinese (Simplified).",
-        "ja" => "All tags must be in Japanese.",
-        "ko" => "All tags must be in Korean.",
-        "es" => "All tags must be in Spanish.",
-        "fr" => "All tags must be in French.",
-        "de" => "All tags must be in German.",
-        "id" => "All tags must be in Indonesian.",
-        _    => "Use the same language as the filename.",
-    };
-
+    let role = if want.any_text() { "You are a librarian cataloguing PDF books." } else { "You are a librarian tagging PDF books." };
     format!(
-        "You are a librarian tagging PDF books. \
-        Given the filename: \"{}\"\n\
-        {}\
-        {}\n\
-        Language rule: {}\n\
-        Rules:\n\
-        - Tags must be short (1-3 words max)\n\
-        - No duplicates\n\
-        - Series rule: if the filename clearly belongs to a named series followed by a number or volume \
-        (e.g. \"My Pals Are Here 3\", \"DK Eyewitness Travel Paris\", \"Goosebumps 12\"), \
-        add the series name as a tag WITHOUT the number (e.g. \"My Pals Are Here\", \"DK Eyewitness Travel\"). \
-        Do NOT create series tags for standalone books (e.g. \"Nguyen Van 6\", \"Toan 7\") \
-        where the number is just a grade level, not a volume in a named series.\n\
-        - Respond with ONLY a JSON array of strings, nothing else.\n\
-        Example response: [\"self-help\", \"productivity\", \"My Pals Are Here\"]",
-        file_name, image_note, vocab_instruction, language_instruction
+        "{} Given the filename: \"{}\"\n{}{}\nLanguage rule: {}\nRules:\n{}\n{}{}",
+        role,
+        file_name,
+        image_note,
+        tasks.join("\n"),
+        language_rule,
+        rules.join("\n"),
+        extra_block,
+        output
     )
 }
 
@@ -281,6 +413,37 @@ fn parse_tags_from_response(text: &str) -> Vec<String> {
     Vec::new()
 }
 
+// Đọc câu trả lời theo những gì đã yêu cầu: JSON array (chỉ tags) hoặc JSON object
+fn parse_ai_response(text: &str, want: Wanted) -> Result<(Vec<String>, Option<String>, Option<String>), String> {
+    if !want.any_text() {
+        return Ok((parse_tags_from_response(text), None, None));
+    }
+    if let (Some(s), Some(e)) = (text.find('{'), text.rfind('}')) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text[s..=e]) {
+            let tags: Vec<String> = if want.tags {
+                v["tags"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|t| t.as_str()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let field = |key: &str, wanted: bool| -> Option<String> {
+                if !wanted {
+                    return None;
+                }
+                v[key].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string)
+            };
+            let short = field("short_description", want.short_description);
+            let long = field("description", want.description);
+            if !tags.is_empty() || short.is_some() || long.is_some() {
+                return Ok((tags, short, long));
+            }
+        }
+    }
+    Err("The AI's answer couldn't be read. Try again, or choose another model.".to_string())
+}
+
 // ===== OPENAI =====
 
 async fn call_openai(
@@ -288,7 +451,8 @@ async fn call_openai(
     model: &str,
     prompt: &str,
     images: &[String],
-) -> Result<Vec<String>, String> {
+    max_output_tokens: u32,
+) -> Result<String, String> {
     let client = reqwest::Client::new();
 
     // Build message content — ảnh (bìa hoặc các trang, theo thứ tự) + text
@@ -313,7 +477,7 @@ async fn call_openai(
                 "content": content
             }
         ],
-        "max_tokens": 100,
+        "max_tokens": max_output_tokens,
         "temperature": 0.3  // Thấp = consistent hơn
     });
 
@@ -341,7 +505,7 @@ async fn call_openai(
         .as_str()
         .unwrap_or("");
 
-    Ok(parse_tags_from_response(text))
+    Ok(text.to_string())
 }
 
 // ===== GEMINI =====
@@ -520,7 +684,7 @@ async fn call_gemini(
     prompt: &str,
     images: &[String],
     free_tier: bool,
-) -> Result<Vec<String>, (String, bool)> {
+) -> Result<String, (String, bool)> {
     let mut parts = vec![serde_json::json!({ "text": prompt })];
     for b64 in images {
         parts.push(serde_json::json!({ "inlineData": { "mimeType": "image/jpeg", "data": b64 } }));
@@ -578,10 +742,10 @@ async fn call_gemini(
         .unwrap_or_default();
     if text.is_empty() {
         let reason = candidate["finishReason"].as_str().unwrap_or("no answer");
-        return Err((format!("Gemini returned no tags ({}).", reason), false));
+        return Err((format!("Gemini returned no answer ({}).", reason), false));
     }
 
-    Ok(parse_tags_from_response(&text))
+    Ok(text)
 }
 
 // ===== CHATGPT (SIGN IN) =====
@@ -614,7 +778,7 @@ async fn call_chatgpt(
     model: &str,
     prompt: &str,
     images: &[String],
-) -> Result<Vec<String>, String> {
+) -> Result<String, String> {
     let mut content: Vec<serde_json::Value> = images
         .iter()
         .map(|b64| serde_json::json!({
@@ -672,7 +836,7 @@ async fn call_chatgpt(
         return Err("ChatGPT response ended unexpectedly.".to_string());
     }
 
-    Ok(parse_tags_from_response(&output))
+    Ok(output)
 }
 
 // ===== OLLAMA =====
@@ -682,7 +846,8 @@ async fn call_ollama(
     model: &str,
     prompt: &str,
     images: &[String],
-) -> Result<Vec<String>, String> {
+    max_output_tokens: u32,
+) -> Result<String, String> {
     let client = reqwest::Client::new();
 
     // Ollama API: /api/chat
@@ -702,7 +867,7 @@ async fn call_ollama(
         "stream": false,
         "options": {
             "temperature": 0.3,
-            "num_predict": 100
+            "num_predict": max_output_tokens
         }
     });
 
@@ -727,7 +892,7 @@ async fn call_ollama(
         .map_err(|e| format!("Parse response failed: {}", e))?;
 
     let text = data["message"]["content"].as_str().unwrap_or("");
-    Ok(parse_tags_from_response(text))
+    Ok(text.to_string())
 }
 
 // ===== MAIN ENTRY POINT =====
@@ -738,8 +903,13 @@ async fn call_ollama(
 pub async fn suggest_tags_batch(
     app_handle: tauri::AppHandle,
     books: Vec<BookToTag>,
+    options: AiFillOptions,
 ) -> Result<Vec<AiTagSuggestion>, String> {
     let settings = get_ai_settings(app_handle.clone())?;
+
+    if !options.tags && !options.short_description && !options.description {
+        return Err("Choose at least one thing for the AI to fill in.".to_string());
+    }
 
     // Validate
     if settings.provider == "openai" && settings.openai_api_key.is_empty() {
@@ -759,10 +929,17 @@ pub async fn suggest_tags_batch(
     let mut results = Vec::new();
 
     for book in books {
-        // Skip nếu đã có đủ tags
-        if book.current_tags.len() >= settings.skip_if_tags_gte as usize {
+        // Tags: bỏ qua nếu sách đã có đủ tags. Description: luôn tạo nếu được chọn.
+        let want = Wanted {
+            tags: options.tags && book.current_tags.len() < settings.skip_if_tags_gte as usize,
+            short_description: options.short_description,
+            description: options.description,
+        };
+        if !want.tags && !want.any_text() {
             continue;
         }
+        // Đủ chỗ cho description dài; chỉ tags thì giữ giới hạn nhỏ như trước
+        let max_output_tokens = if want.any_text() { 1500 } else { 100 };
 
         // Ảnh gửi kèm theo input_mode: không có / ảnh bìa / mọi trang
         let images: Vec<String> = match settings.input_mode.as_str() {
@@ -770,12 +947,7 @@ pub async fn suggest_tags_batch(
             "pages" => match pages_to_base64(&app_handle, &book.path).await {
                 Ok(pages) => pages,
                 Err(e) => {
-                    results.push(AiTagSuggestion {
-                        path: book.path,
-                        file_name: book.file_name,
-                        suggested_tags: Vec::new(),
-                        error: Some(e),
-                    });
+                    results.push(AiTagSuggestion::failed(book.path, book.file_name, e));
                     continue;
                 }
             },
@@ -793,6 +965,8 @@ pub async fn suggest_tags_batch(
             &settings.tag_language,
             settings.max_tags,
             &image_note,
+            want,
+            &options.extra_prompt,
         );
 
         let tag_result = match settings.provider.as_str() {
@@ -802,6 +976,7 @@ pub async fn suggest_tags_batch(
                     &settings.openai_model,
                     &prompt,
                     &images,
+                    max_output_tokens,
                 )
                 .await
             }
@@ -820,12 +995,7 @@ pub async fn suggest_tags_batch(
                     if results.is_empty() {
                         return Err(message);
                     }
-                    results.push(AiTagSuggestion {
-                        path: book.path,
-                        file_name: book.file_name,
-                        suggested_tags: Vec::new(),
-                        error: Some(message),
-                    });
+                    results.push(AiTagSuggestion::failed(book.path, book.file_name, message));
                     break;
                 }
                 Err((message, false)) => Err(message),
@@ -843,25 +1013,23 @@ pub async fn suggest_tags_batch(
                     &settings.ollama_model,
                     &prompt,
                     &images,
+                    max_output_tokens,
                 )
                 .await
             }
             _ => Err(format!("Unknown provider: {}", settings.provider)),
         };
 
-        match tag_result {
-            Ok(tags) => results.push(AiTagSuggestion {
+        match tag_result.and_then(|text| parse_ai_response(&text, want)) {
+            Ok((tags, short_description, description)) => results.push(AiTagSuggestion {
                 path: book.path,
                 file_name: book.file_name,
                 suggested_tags: limit_tags(tags, settings.max_tags),
+                short_description,
+                description,
                 error: None,
             }),
-            Err(e) => results.push(AiTagSuggestion {
-                path: book.path,
-                file_name: book.file_name,
-                suggested_tags: Vec::new(),
-                error: Some(e),
-            }),
+            Err(e) => results.push(AiTagSuggestion::failed(book.path, book.file_name, e)),
         }
     }
 

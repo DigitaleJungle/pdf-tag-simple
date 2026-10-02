@@ -45,7 +45,8 @@ export const api = {
 
     // Suggest tags cho 1 batch sách — trả về [{path, file_name, suggested_tags, error}]
     // Frontend dùng để hiện preview trước khi apply
-    suggestTagsBatch: (books) => invoke("suggest_tags_batch", { books }),
+    // options = { tags, short_description, description } — những gì AI cần điền
+    suggestTagsBatch: (books, options) => invoke("suggest_tags_batch", { books, options }),
 
     // Kiểm tra Ollama có đang chạy ở host không
     checkOllama: (host) => invoke("check_ollama", { host }),

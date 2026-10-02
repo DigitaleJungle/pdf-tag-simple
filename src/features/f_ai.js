@@ -48,6 +48,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
         skip_if_tags_gte: 5,
         max_tags: 5,
         tag_language: "auto",
+        saved_prompts: [],
     }));
 
     loading.remove();
@@ -459,6 +460,115 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     renderVocabChips();
     body.appendChild(vocabEditor);
 
+    // Saved prompts — chọn được trong cửa sổ AI auto làm "Extra instructions"
+    body.appendChild(makeDivider());
+    body.appendChild(makeLabel("Saved prompts (optional)"));
+    const promptsHint = document.createElement("div");
+    promptsHint.style.cssText = "font-size:11px; color:var(--text-secondary); margin-bottom:6px;";
+    promptsHint.innerText = "Extra instructions you can pick in the AI auto window, e.g. \"Write descriptions for a teenage audience\". Click Save Settings to keep changes.";
+    body.appendChild(promptsHint);
+
+    let savedPrompts = (settings.saved_prompts || []).map(p => ({ name: p.name, text: p.text }));
+    let editingIndex = -1; // -1 = đang thêm prompt mới
+
+    const promptList = document.createElement("div");
+    promptList.style.cssText = "display:flex; flex-direction:column; gap:6px;";
+    body.appendChild(promptList);
+
+    const promptForm = document.createElement("div");
+    promptForm.style.cssText = "display:flex; flex-direction:column; gap:6px; border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--panel);";
+    const promptNameInput = makeInput("text", "", "Prompt name");
+    const promptTextInput = document.createElement("textarea");
+    promptTextInput.rows = 3;
+    promptTextInput.placeholder = "Instructions for the AI...";
+    promptTextInput.style.cssText = "width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; outline:none; box-sizing:border-box; background:var(--panel); color:var(--text); font-family:inherit; resize:vertical;";
+    [promptNameInput, promptTextInput].forEach(el => el.addEventListener("keydown", (e) => {
+        // Ctrl+A chọn text trong ô thay vì "select all books"
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") e.stopPropagation();
+    }));
+    const promptFormButtons = document.createElement("div");
+    promptFormButtons.style.cssText = "display:flex; gap:8px; align-items:center;";
+    const promptSaveBtn = makeBtn("Add prompt", false, null);
+    const promptCancelBtn = makeBtn("Cancel", false, null);
+    const promptFormStatus = document.createElement("span");
+    promptFormStatus.style.cssText = "font-size:12px; color:var(--danger);";
+    promptFormButtons.appendChild(promptSaveBtn);
+    promptFormButtons.appendChild(promptCancelBtn);
+    promptFormButtons.appendChild(promptFormStatus);
+    promptForm.appendChild(promptNameInput);
+    promptForm.appendChild(promptTextInput);
+    promptForm.appendChild(promptFormButtons);
+    body.appendChild(promptForm);
+
+    function resetPromptForm() {
+        editingIndex = -1;
+        promptNameInput.value = "";
+        promptTextInput.value = "";
+        promptSaveBtn.innerText = "Add prompt";
+        promptCancelBtn.style.display = "none";
+        promptFormStatus.innerText = "";
+    }
+
+    function renderPromptList() {
+        promptList.innerHTML = "";
+        savedPrompts.forEach((p, i) => {
+            const item = document.createElement("div");
+            item.style.cssText = "display:flex; align-items:flex-start; gap:8px; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--panel-soft);";
+            const textWrap = document.createElement("div");
+            textWrap.style.cssText = "flex:1; min-width:0;";
+            const name = document.createElement("div");
+            name.style.cssText = "font-size:13px; font-weight:600; color:var(--text);";
+            name.innerText = p.name;
+            const preview = document.createElement("div");
+            preview.style.cssText = "font-size:11px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;";
+            preview.innerText = p.text;
+            preview.title = p.text;
+            textWrap.appendChild(name);
+            textWrap.appendChild(preview);
+            const editBtn = makeBtn("Edit", false, () => {
+                editingIndex = i;
+                promptNameInput.value = p.name;
+                promptTextInput.value = p.text;
+                promptSaveBtn.innerText = "Update prompt";
+                promptCancelBtn.style.display = "";
+                promptFormStatus.innerText = "";
+                promptNameInput.focus();
+            });
+            const deleteBtn = makeBtn("Delete", false, () => {
+                savedPrompts.splice(i, 1);
+                if (editingIndex === i) resetPromptForm();
+                else if (editingIndex > i) editingIndex--;
+                renderPromptList();
+            });
+            [editBtn, deleteBtn].forEach(b => { b.style.padding = "5px 10px"; b.style.fontSize = "12px"; });
+            item.appendChild(textWrap);
+            item.appendChild(editBtn);
+            item.appendChild(deleteBtn);
+            promptList.appendChild(item);
+        });
+    }
+
+    promptSaveBtn.onclick = () => {
+        const name = promptNameInput.value.trim();
+        const text = promptTextInput.value.trim();
+        if (!name || !text) {
+            promptFormStatus.innerText = "Enter a name and the prompt text.";
+            return;
+        }
+        const duplicate = savedPrompts.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
+        if (duplicate !== -1 && duplicate !== editingIndex) {
+            promptFormStatus.innerText = "A prompt with this name already exists.";
+            return;
+        }
+        if (editingIndex >= 0) savedPrompts[editingIndex] = { name, text };
+        else savedPrompts.push({ name, text });
+        resetPromptForm();
+        renderPromptList();
+    };
+    promptCancelBtn.onclick = resetPromptForm;
+    resetPromptForm();
+    renderPromptList();
+
     function gatherSettings() {
         const v = vocabInput.value.trim();
         if (v && !vocabTags.includes(v)) vocabTags.push(v);
@@ -479,6 +589,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
             tag_vocabulary: vocabTags,
             skip_if_tags_gte: parseInt(skipInput.value) || 5,
             max_tags: Math.min(20, Math.max(1, parseInt(maxTagsInput.value) || 5)),
+            saved_prompts: savedPrompts,
         };
     }
 
@@ -570,7 +681,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     // --- Scope selection ---
     const scopeBlock = document.createElement("div");
     scopeBlock.style.cssText = "display:flex; flex-direction:column; gap:8px;";
-    scopeBlock.appendChild(makeLabel("Tag which books?"));
+    scopeBlock.appendChild(makeLabel("Which books?"));
 
     const scopeOptions = [
         { value: "all", label: `All books (${allBooks.length})` },
@@ -585,6 +696,83 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     const scopeSelect = makeSelect(scopeOptions, selectedArr.length > 0 ? "selected" : "all");
     scopeBlock.appendChild(scopeSelect);
     body.appendChild(scopeBlock);
+
+    // --- What to fill in ---
+    // Lựa chọn được nhớ lại giữa các lần mở (chỉ là tiện ích, lỗi storage thì dùng mặc định)
+    let fillOptions = { tags: true, short_description: false, description: false };
+    try {
+        const saved = JSON.parse(localStorage.getItem("aiFillOptions") || "null");
+        if (saved && typeof saved === "object") fillOptions = { ...fillOptions, ...saved };
+    } catch { /* ignore */ }
+
+    const fillBlock = document.createElement("div");
+    fillBlock.style.cssText = "display:flex; flex-direction:column; gap:8px;";
+    fillBlock.appendChild(makeLabel("What should the AI fill in?"));
+    const fillRow = document.createElement("div");
+    fillRow.style.cssText = "display:flex; flex-wrap:wrap; gap:16px;";
+    const fillCheckboxes = {};
+    [
+        { key: "tags", label: "Tags" },
+        { key: "short_description", label: "Short description" },
+        { key: "description", label: "Long description" },
+    ].forEach(({ key, label }) => {
+        const wrap = document.createElement("label");
+        wrap.style.cssText = "display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text); cursor:pointer;";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!fillOptions[key];
+        cb.addEventListener("change", () => {
+            fillOptions[key] = cb.checked;
+            try { localStorage.setItem("aiFillOptions", JSON.stringify(fillOptions)); } catch { /* ignore */ }
+            updateCostEstimate();
+        });
+        fillCheckboxes[key] = cb;
+        wrap.appendChild(cb);
+        wrap.appendChild(document.createTextNode(label));
+        fillRow.appendChild(wrap);
+    });
+    fillBlock.appendChild(fillRow);
+    const fillHint = document.createElement("div");
+    fillHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    fillHint.innerText = "Descriptions replace the current ones when you apply; you can edit them first. They're most accurate with \"Filename + all pages\".";
+    fillBlock.appendChild(fillHint);
+    body.appendChild(fillBlock);
+
+    // --- Extra instructions ---
+    // Chọn prompt soạn sẵn rồi sửa cho lần chạy này (không lưu lại), tự gõ, hoặc để trống
+    const promptBlock = document.createElement("div");
+    promptBlock.style.cssText = "display:flex; flex-direction:column; gap:8px;";
+    promptBlock.appendChild(makeLabel("Extra instructions (optional)"));
+    const savedPrompts = settings.saved_prompts || [];
+    const promptSelect = makeSelect([
+        { value: "", label: savedPrompts.length > 0 ? "Start from: blank" : "Start from: blank (no saved prompts yet)" },
+        ...savedPrompts.map((p, i) => ({ value: String(i), label: `Start from: ${p.name}` })),
+    ], "");
+    const promptText = document.createElement("textarea");
+    promptText.rows = 3;
+    promptText.placeholder = "Leave empty to send no extra instructions.";
+    promptText.style.cssText = "width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; outline:none; box-sizing:border-box; background:var(--panel); color:var(--text); font-family:inherit; resize:vertical;";
+    promptText.addEventListener("keydown", (e) => {
+        // Ctrl+A chọn text trong ô thay vì "select all books"
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") e.stopPropagation();
+    });
+    promptSelect.addEventListener("change", () => {
+        const picked = savedPrompts[parseInt(promptSelect.value)];
+        promptText.value = picked ? picked.text : "";
+    });
+    const promptHint = document.createElement("div");
+    promptHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    promptHint.innerText = "Changes here only apply to this run. Manage saved prompts in Settings > AI Settings.";
+    promptBlock.appendChild(promptSelect);
+    promptBlock.appendChild(promptText);
+    promptBlock.appendChild(promptHint);
+    body.appendChild(promptBlock);
+
+    // Sách cần xử lý: thiếu tags (khi chọn Tags) hoặc có chọn description
+    function needsWork(b) {
+        return (fillOptions.tags && (b.tags?.length || 0) < settings.skip_if_tags_gte)
+            || fillOptions.short_description || fillOptions.description;
+    }
 
     // --- Cost estimate ---
     // Ẩn hoàn toàn khi provider = ollama (local = free, không cần estimate)
@@ -605,7 +793,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         else if (scope === "folder") books = folderBooks;
         else books = allBooks;
 
-        const eligible = books.filter(b => (b.tags?.length || 0) < settings.skip_if_tags_gte);
+        const eligible = books.filter(needsWork);
 
         // Gemini free tier: no cost, but time (~6.5 s per book) and a daily limit
         if (settings.provider === "gemini_free") {
@@ -617,6 +805,9 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         const { totalTokens, cost } = estimateCost(eligible.length, settings.input_mode);
 
         let costText = `~${eligible.length} books · ~${totalTokens.toLocaleString()} tokens · Est. cost: $${cost}`;
+        if (fillOptions.short_description || fillOptions.description) {
+            costText += " (descriptions add output tokens on top)";
+        }
         if (settings.input_mode === "thumbnail") {
             costText += " ⚠️ Thumbnail mode costs more";
         } else if (settings.input_mode === "pages") {
@@ -635,7 +826,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     // --- Progress + results ---
     const statusText = document.createElement("div");
     statusText.style.cssText = "font-size:13px; color:var(--text-secondary);";
-    statusText.innerText = "Click Start to begin tagging.";
+    statusText.innerText = "Click Start to begin.";
 
     const progressWrap = document.createElement("div");
     progressWrap.style.cssText = "background:var(--border); border-radius:3px; height:6px; overflow:hidden; display:none;";
@@ -659,7 +850,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     footerRight.style.cssText = "display:flex; gap:8px;";
 
     const cancelBtn = makeBtn("Cancel", false, () => overlay.remove());
-    const startBtn = makeBtn("Start tagging", true, null);
+    const startBtn = makeBtn("Start", true, null);
     const applyBtn = makeBtn("Apply all", true, null);
     applyBtn.style.display = "none";
     applyBtn.style.background = "var(--success)";
@@ -687,15 +878,23 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         else if (scope === "folder") booksToProcess = folderBooks;
         else booksToProcess = allBooks;
 
-        const eligible = booksToProcess.filter(b => (b.tags?.length || 0) < settings.skip_if_tags_gte);
+        if (!fillOptions.tags && !fillOptions.short_description && !fillOptions.description) {
+            statusText.innerText = "Choose at least one thing for the AI to fill in.";
+            return;
+        }
+        const eligible = booksToProcess.filter(needsWork);
 
         if (eligible.length === 0) {
-            statusText.innerText = "No books to tag (all have enough tags already).";
+            statusText.innerText = "No books to process (all have enough tags already).";
             return;
         }
 
         startBtn.disabled = true;
         scopeSelect.disabled = true;
+        Object.values(fillCheckboxes).forEach(cb => { cb.disabled = true; });
+        promptSelect.disabled = true;
+        promptText.disabled = true;
+        const runOptions = { ...fillOptions, extra_prompt: promptText.value.trim() };
         progressWrap.style.display = "";
         resultsWrap.innerHTML = "";
         allSuggestions = [];
@@ -706,7 +905,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 
         for (let i = 0; i < eligible.length; i += BATCH_SIZE) {
             const batch = eligible.slice(i, i + BATCH_SIZE);
-            statusText.innerText = `Tagging batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(total / BATCH_SIZE)}... (${processed}/${total})`;
+            statusText.innerText = `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(total / BATCH_SIZE)}... (${processed}/${total})`;
 
             try {
                 const suggestions = await api.suggestTagsBatch(batch.map(b => ({
@@ -714,10 +913,12 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
                     file_name: b.file_name,
                     thumbnail_path: b.thumbnail_path || "",
                     current_tags: b.tags || [],
-                })));
+                })), runOptions);
 
                 allSuggestions.push(...suggestions);
-                for (const s of suggestions) resultsWrap.appendChild(renderSuggestionRow(s));
+                for (const s of suggestions) {
+                    resultsWrap.appendChild(renderSuggestionRow(s, allBooks.find(b => b.path === s.path)));
+                }
                 processed += batch.length;
                 progressFill.style.width = `${Math.round((processed / total) * 100)}%`;
             } catch (err) {
@@ -726,18 +927,18 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
             }
         }
 
-        const taggedCount = allSuggestions.filter(s => !s.error).length;
+        const doneCount = allSuggestions.filter(s => !s.error).length;
         if (runError) {
             // Show the error (it used to be overwritten right away by "Done!")
-            statusText.innerText = `Stopped: ${runError} (${taggedCount}/${total} books tagged)`;
+            statusText.innerText = `Stopped: ${runError} (${doneCount}/${total} books done)`;
             statusText.style.color = "var(--danger)";
         } else {
-            statusText.innerText = `Done! ${taggedCount}/${total} books tagged.`;
+            statusText.innerText = `Done! ${doneCount}/${total} books processed.`;
         }
         progressFill.style.width = "100%";
         startBtn.style.display = "none";
         applyBtn.style.display = "";
-        footerLeft.innerText = "Review tags above, then click Apply.";
+        footerLeft.innerText = "Review the results above, then click Apply.";
     };
 
     // Apply
@@ -749,14 +950,26 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         let applied = 0;
 
         for (const s of allSuggestions) {
-            if (s.error || s.suggested_tags.length === 0) continue;
+            if (s.error) continue;
 
+            // Đọc giá trị (có thể đã sửa) từ preview row
             const row = resultsWrap.querySelector(`[data-path="${CSS.escape(s.path)}"]`);
             let finalTags = s.suggested_tags;
+            let shortText = s.short_description || "";
+            let longText = s.description || "";
             if (row) {
-                const chips = row.querySelectorAll(".tag-chip-text");
-                finalTags = [...chips].map(el => el.innerText).filter(Boolean);
+                finalTags = [...row.querySelectorAll(".tag-chip-text")].map(el => el.innerText).filter(Boolean);
+                const shortEl = row.querySelector(".ai-short-description");
+                const longEl = row.querySelector(".ai-description");
+                if (shortEl) shortText = shortEl.value;
+                if (longEl) longText = longEl.value;
             }
+            shortText = shortText.trim();
+            longText = longText.trim();
+            // Chỉ lưu description khi được tạo ở lần chạy này và không bị xóa trống
+            const newShort = s.short_description != null && shortText ? shortText : undefined;
+            const newLong = s.description != null && longText ? longText : undefined;
+            if (finalTags.length === 0 && newShort === undefined && newLong === undefined) continue;
 
             try {
                 const book = books.find(b => b.path === s.path);
@@ -765,7 +978,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
                 for (const t of finalTags) {
                     if (!merged.some(x => x.toLowerCase() === t.toLowerCase())) merged.push(t);
                 }
-                await api.updateBook(s.path, book?.file_name || s.file_name, merged);
+                await api.updateBook(s.path, book?.file_name || s.file_name, merged, newLong, newShort);
                 applied++;
             } catch (err) {
                 console.error("Apply error:", s.path, err);
@@ -782,7 +995,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 // =============================================
 // SUGGESTION ROW
 // =============================================
-function renderSuggestionRow(suggestion) {
+function renderSuggestionRow(suggestion, book) {
     const row = document.createElement("div");
     row.dataset.path = suggestion.path;
     row.style.cssText = "border:1px solid var(--border); border-radius:8px; padding:10px 12px; background:var(--panel-soft); display:flex; flex-direction:column; gap:6px;";
@@ -820,7 +1033,32 @@ function renderSuggestionRow(suggestion) {
     }
     renderChips();
     row.appendChild(nameEl);
-    row.appendChild(tagsWrap);
+    if (currentTags.length > 0) row.appendChild(tagsWrap);
+
+    // Descriptions: editable trước khi Apply
+    function addTextField(labelText, value, current, className, multiline) {
+        const label = document.createElement("div");
+        label.style.cssText = "font-size:11px; font-weight:600; color:var(--text-secondary); margin-top:2px;";
+        label.innerText = current ? `${labelText} (replaces the current one)` : labelText;
+        const field = document.createElement(multiline ? "textarea" : "input");
+        field.className = className;
+        field.value = value;
+        if (multiline) field.rows = 4;
+        field.style.cssText = "width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid var(--border); border-radius:6px; font-size:12px; font-family:inherit; background:var(--panel); color:var(--text); resize:vertical;";
+        field.title = current ? `Current: ${current}` : "";
+        // Ctrl+A chọn text trong ô thay vì "select all books"
+        field.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") e.stopPropagation();
+        });
+        row.appendChild(label);
+        row.appendChild(field);
+    }
+    if (suggestion.short_description != null) {
+        addTextField("Short description", suggestion.short_description, book?.short_description, "ai-short-description", false);
+    }
+    if (suggestion.description != null) {
+        addTextField("Long description", suggestion.description, book?.description, "ai-description", true);
+    }
     return row;
 }
 

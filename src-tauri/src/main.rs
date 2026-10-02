@@ -178,8 +178,9 @@ fn save_ai_settings(
 async fn suggest_tags_batch(
     app_handle: tauri::AppHandle,
     books: Vec<ai_service::BookToTag>,
+    options: ai_service::AiFillOptions,
 ) -> Result<Vec<ai_service::AiTagSuggestion>, String> {
-    ai_service::suggest_tags_batch(app_handle, books).await
+    ai_service::suggest_tags_batch(app_handle, books, options).await
 }
 
 // Kiểm tra Ollama có đang chạy không
