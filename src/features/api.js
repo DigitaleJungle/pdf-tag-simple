@@ -50,6 +50,17 @@ export const api = {
     // Kiểm tra Ollama có đang chạy ở host không
     checkOllama: (host) => invoke("check_ollama", { host }),
 
+    // Gemini — danh sách model dùng được với API key này
+    geminiModels: (apiKey) => invoke("gemini_list_models", { apiKey }),
+
+    // Sign in with ChatGPT — dùng plan ChatGPT của user thay vì API key
+    // signIn mở browser và chờ tới khi user đăng nhập xong (hoặc cancel/timeout)
+    chatgptStatus: () => invoke("chatgpt_status"),
+    chatgptSignIn: () => invoke("chatgpt_sign_in"),
+    chatgptCancelSignIn: () => invoke("chatgpt_cancel_sign_in"),
+    chatgptSignOut: () => invoke("chatgpt_sign_out"),
+    chatgptModels: () => invoke("chatgpt_list_models"),
+
     // ===== TAG MANAGEMENT =====
     // Đổi tên tag trên toàn bộ sách có tag đó
     renameTag: (oldName, newName) => invoke("rename_tag", { oldName, newName }),

@@ -3,6 +3,7 @@
 mod db;
 mod scanner;
 mod ai_service;
+mod chatgpt_auth;
 mod page_cache;
 
 #[tauri::command]
@@ -183,6 +184,37 @@ async fn suggest_tags_batch(
 
 // Kiểm tra Ollama có đang chạy không
 #[tauri::command]
+async fn gemini_list_models(api_key: String) -> Result<Vec<ai_service::GeminiModel>, String> {
+    ai_service::list_gemini_models(&api_key).await
+}
+
+// ===== CHATGPT SIGN IN =====
+#[tauri::command]
+fn chatgpt_status(app_handle: tauri::AppHandle) -> Result<chatgpt_auth::ChatGptStatus, String> {
+    chatgpt_auth::status(&app_handle)
+}
+
+#[tauri::command]
+async fn chatgpt_sign_in(app_handle: tauri::AppHandle) -> Result<chatgpt_auth::ChatGptStatus, String> {
+    chatgpt_auth::sign_in(app_handle).await
+}
+
+#[tauri::command]
+fn chatgpt_cancel_sign_in() {
+    chatgpt_auth::cancel_sign_in()
+}
+
+#[tauri::command]
+fn chatgpt_sign_out(app_handle: tauri::AppHandle) -> Result<(), String> {
+    chatgpt_auth::sign_out(&app_handle)
+}
+
+#[tauri::command]
+async fn chatgpt_list_models(app_handle: tauri::AppHandle) -> Result<Vec<chatgpt_auth::ChatGptModel>, String> {
+    chatgpt_auth::list_models(&app_handle).await
+}
+
+#[tauri::command]
 async fn check_ollama(host: String) -> bool {
     ai_service::check_ollama(&host).await
 }
@@ -288,6 +320,12 @@ fn main() {
             save_ai_settings,
             suggest_tags_batch,
             check_ollama,
+            gemini_list_models,
+            chatgpt_status,
+            chatgpt_sign_in,
+            chatgpt_cancel_sign_in,
+            chatgpt_sign_out,
+            chatgpt_list_models,
             rename_tag,
             delete_tag,
             find_duplicates,

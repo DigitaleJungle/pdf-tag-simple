@@ -38,11 +38,15 @@ export async function renderAiSettingsSection(container, ctx = {}) {
         provider: "openai",
         openai_api_key: "",
         openai_model: "gpt-4o-mini",
+        gemini_api_key: "",
+        gemini_model: "",
+        chatgpt_model: "",
         ollama_host: "http://localhost:11434",
         ollama_model: "llama3.2",
         input_mode: "filename",
         tag_vocabulary: [],
         skip_if_tags_gte: 5,
+        max_tags: 5,
         tag_language: "auto",
     }));
 
@@ -93,7 +97,10 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     // Provider
     body.appendChild(makeLabel("Provider"));
     const providerSelect = makeSelect([
-        { value: "openai", label: "OpenAI (online)" },
+        { value: "openai", label: "OpenAI (API key)" },
+        { value: "gemini", label: "Gemini (API key)" },
+        { value: "gemini_free", label: "Gemini (free tier)" },
+        { value: "chatgpt", label: "ChatGPT (sign in with your plan) (beta)" },
         { value: "ollama", label: "Ollama (local)" },
     ], settings.provider);
     body.appendChild(providerSelect);
@@ -110,6 +117,198 @@ export async function renderAiSettingsSection(container, ctx = {}) {
         { value: "gpt-4o", label: "gpt-4o (more accurate)" },
     ], settings.openai_model);
     openaiSection.appendChild(openaiModelSelect);
+
+    // Gemini section — dùng chung cho "gemini" và "gemini_free"
+    const geminiSection = document.createElement("div");
+    geminiSection.style.cssText = "display:flex; flex-direction:column; gap:10px;";
+    geminiSection.appendChild(makeLabel("Gemini API Key"));
+    const geminiKeyInput = makeInput("password", settings.gemini_api_key || "", "AIza...");
+    geminiSection.appendChild(geminiKeyInput);
+
+    geminiSection.appendChild(makeLabel("Gemini Model"));
+    const geminiModelRow = document.createElement("div");
+    geminiModelRow.style.cssText = "display:flex; gap:8px; align-items:center;";
+    const geminiModelSelect = makeSelect([], "");
+    geminiModelSelect.style.flex = "1";
+    const geminiLoadBtn = document.createElement("button");
+    geminiLoadBtn.innerText = "Load models";
+    geminiLoadBtn.style.cssText = "flex-shrink:0; padding:8px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:12px; background:var(--panel); color:var(--text);";
+    geminiModelRow.appendChild(geminiModelSelect);
+    geminiModelRow.appendChild(geminiLoadBtn);
+    geminiSection.appendChild(geminiModelRow);
+
+    const geminiStatus = document.createElement("div");
+    geminiStatus.style.cssText = "font-size:12px; color:var(--text-secondary);";
+    geminiSection.appendChild(geminiStatus);
+
+    const geminiHint = document.createElement("div");
+    geminiHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    geminiHint.innerText = "Create an API key at aistudio.google.com. Whether usage is free or paid depends on billing on the key's Google Cloud project, not on this setting.";
+    geminiSection.appendChild(geminiHint);
+
+    const geminiFreeNote = document.createElement("div");
+    geminiFreeNote.style.cssText = "font-size:11px; line-height:1.45; color:var(--text-secondary); background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:8px 10px;";
+    geminiFreeNote.innerHTML = `
+        <div><b>Rate limit:</b> the free tier allows about 10 requests per minute and roughly 1,000 per day, depending on the model. PDF Tag Simple waits about 6 seconds between books to stay under it, so 100 books take around 10 minutes. Pro models aren't available on the free tier.</div>
+        <div style="margin-top:6px;"><b>Privacy:</b> on the free tier Google may use what you send — book filenames, and cover images if enabled — to improve its products, and human reviewers may read it. Don't use it for files whose names contain sensitive or personal information.</div>`;
+    geminiSection.appendChild(geminiFreeNote);
+
+    let geminiModels = null; // null = not loaded yet
+
+    function renderGeminiModels() {
+        const isFree = providerSelect.value === "gemini_free";
+        const saved = geminiModelSelect.value || settings.gemini_model || "";
+        geminiModelSelect.innerHTML = "";
+        // Pro models aren't available on the free tier
+        const list = (geminiModels || []).filter(m => !isFree || !m.id.includes("-pro"));
+        if (saved && !list.some(m => m.id === saved)) {
+            if (geminiModels === null) list.unshift({ id: saved, display_name: saved });
+        }
+        if (list.length === 0) {
+            const o = document.createElement("option");
+            o.value = "";
+            o.innerText = geminiModels === null ? "Click \"Load models\"" : "No models available for this key";
+            geminiModelSelect.appendChild(o);
+            return;
+        }
+        // Default: a Flash model that answered normally, when nothing is chosen yet
+        const fallback = list.find(m => m.id.includes("flash") && !m.note) || list.find(m => !m.note) || list[0];
+        const selected = list.some(m => m.id === saved) ? saved : fallback.id;
+        list.forEach(m => {
+            const o = document.createElement("option");
+            o.value = m.id;
+            const label = m.display_name && m.display_name !== m.id ? `${m.display_name} (${m.id})` : m.id;
+            o.innerText = m.note ? `${label} — ${m.note}` : label;
+            if (m.id === selected) o.selected = true;
+            geminiModelSelect.appendChild(o);
+        });
+    }
+
+    async function loadGeminiModels() {
+        geminiStatus.style.color = "var(--text-secondary)";
+        geminiStatus.innerText = "Checking which models work with this key...";
+        geminiLoadBtn.disabled = true;
+        try {
+            geminiModels = await api.geminiModels(geminiKeyInput.value.trim());
+            geminiStatus.innerText = "";
+        } catch (err) {
+            geminiStatus.innerText = String(err);
+            geminiStatus.style.color = "var(--danger)";
+        } finally {
+            geminiLoadBtn.disabled = false;
+            renderGeminiModels();
+        }
+    }
+
+    geminiLoadBtn.onclick = loadGeminiModels;
+    geminiKeyInput.addEventListener("change", () => { if (geminiKeyInput.value.trim()) loadGeminiModels(); });
+    renderGeminiModels();
+
+    // ChatGPT (sign in) section
+    const chatgptSection = document.createElement("div");
+    chatgptSection.style.cssText = "display:flex; flex-direction:column; gap:10px;";
+    chatgptSection.appendChild(makeLabel("ChatGPT Account"));
+
+    const chatgptStatusRow = document.createElement("div");
+    chatgptStatusRow.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap;";
+    const chatgptStatus = document.createElement("span");
+    chatgptStatus.style.cssText = "font-size:12px; color:var(--text-secondary); flex:1; min-width:150px;";
+    const chatgptSignInBtn = document.createElement("button");
+    chatgptSignInBtn.style.cssText = "padding:6px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:12px; background:var(--panel); color:var(--text);";
+    chatgptStatusRow.appendChild(chatgptStatus);
+    chatgptStatusRow.appendChild(chatgptSignInBtn);
+    chatgptSection.appendChild(chatgptStatusRow);
+
+    const chatgptModelLabel = makeLabel("ChatGPT Model");
+    chatgptSection.appendChild(chatgptModelLabel);
+    const chatgptModelSelect = makeSelect([], "");
+    chatgptSection.appendChild(chatgptModelSelect);
+
+    const chatgptHint = document.createElement("div");
+    chatgptHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    chatgptHint.innerText = "Signs in through your browser. Tagging counts toward your ChatGPT plan's usage limits — no API key needed.";
+    chatgptSection.appendChild(chatgptHint);
+
+    let chatgptState = "signed-out"; // "signed-out" | "waiting" | "signed-in"
+
+    function renderChatgptState(email = "") {
+        const signedIn = chatgptState === "signed-in";
+        chatgptStatus.style.color = signedIn ? "#2e7d32" : "var(--text-secondary)";
+        chatgptStatus.innerText = signedIn
+            ? `Signed in${email ? " as " + email : ""}`
+            : chatgptState === "waiting" ? "Waiting for sign-in in your browser..." : "Not signed in";
+        chatgptSignInBtn.innerText = signedIn ? "Sign out" : chatgptState === "waiting" ? "Cancel" : "Sign in with ChatGPT";
+        chatgptModelLabel.style.display = signedIn ? "" : "none";
+        chatgptModelSelect.style.display = signedIn ? "" : "none";
+    }
+
+    async function loadChatgptModels() {
+        chatgptModelSelect.innerHTML = "";
+        const loadingOpt = document.createElement("option");
+        loadingOpt.innerText = "Loading models...";
+        chatgptModelSelect.appendChild(loadingOpt);
+        try {
+            const models = await api.chatgptModels();
+            chatgptModelSelect.innerHTML = "";
+            const saved = settings.chatgpt_model;
+            if (saved && !models.some(m => m.slug === saved)) models.unshift({ slug: saved, display_name: saved });
+            models.forEach(m => {
+                const o = document.createElement("option");
+                o.value = m.slug;
+                o.innerText = m.display_name || m.slug;
+                if (m.slug === saved) o.selected = true;
+                chatgptModelSelect.appendChild(o);
+            });
+            if (models.length === 0) {
+                const none = document.createElement("option");
+                none.value = ""; none.innerText = "No models available for this account";
+                chatgptModelSelect.appendChild(none);
+            }
+        } catch (err) {
+            chatgptModelSelect.innerHTML = "";
+            const errOpt = document.createElement("option");
+            errOpt.value = settings.chatgpt_model || "";
+            errOpt.innerText = settings.chatgpt_model || "Could not load models";
+            chatgptModelSelect.appendChild(errOpt);
+            chatgptStatus.innerText = String(err);
+            chatgptStatus.style.color = "var(--danger)";
+        }
+    }
+
+    chatgptSignInBtn.onclick = async () => {
+        if (chatgptState === "waiting") {
+            await api.chatgptCancelSignIn().catch(() => {});
+            return;
+        }
+        if (chatgptState === "signed-in") {
+            await api.chatgptSignOut().catch(err => console.error("ChatGPT sign out failed:", err));
+            chatgptState = "signed-out";
+            renderChatgptState();
+            return;
+        }
+        chatgptState = "waiting";
+        renderChatgptState();
+        try {
+            const status = await api.chatgptSignIn();
+            chatgptState = "signed-in";
+            renderChatgptState(status.email);
+            await loadChatgptModels();
+        } catch (err) {
+            chatgptState = "signed-out";
+            renderChatgptState();
+            chatgptStatus.innerText = String(err);
+            chatgptStatus.style.color = "var(--danger)";
+        }
+    };
+
+    try {
+        const status = await api.chatgptStatus();
+        chatgptState = status.signed_in ? "signed-in" : "signed-out";
+        renderChatgptState(status.email);
+        if (status.signed_in) loadChatgptModels();
+    } catch (err) {
+        renderChatgptState();
+    }
 
     // Ollama section
     const ollamaSection = document.createElement("div");
@@ -144,10 +343,20 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     ollamaSection.appendChild(ollamaHint);
 
     body.appendChild(openaiSection);
+    body.appendChild(geminiSection);
+    body.appendChild(chatgptSection);
     body.appendChild(ollamaSection);
 
     function updateProviderSections() {
         openaiSection.style.display = providerSelect.value === "openai" ? "flex" : "none";
+        const isGemini = providerSelect.value === "gemini" || providerSelect.value === "gemini_free";
+        geminiSection.style.display = isGemini ? "flex" : "none";
+        geminiFreeNote.style.display = providerSelect.value === "gemini_free" ? "" : "none";
+        if (isGemini) {
+            if (geminiModels === null && geminiKeyInput.value.trim()) loadGeminiModels();
+            else renderGeminiModels();
+        }
+        chatgptSection.style.display = providerSelect.value === "chatgpt" ? "flex" : "none";
         ollamaSection.style.display = providerSelect.value === "ollama" ? "flex" : "none";
     }
     providerSelect.addEventListener("change", updateProviderSections);
@@ -159,8 +368,16 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     const inputModeSelect = makeSelect([
         { value: "filename", label: "Filename only (fast, works with any model)" },
         { value: "thumbnail", label: "Filename + cover image (needs vision model)" },
+        { value: "pages", label: "Filename + all pages (slowest, needs vision model)" },
     ], settings.input_mode);
     body.appendChild(inputModeSelect);
+    const pagesHint = document.createElement("div");
+    pagesHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    pagesHint.innerText = "Every page is rendered as a small image (512 px wide) and sent with the filename — not the PDF file itself. Cost and time grow with the number of pages, and books over roughly 300 pages are too large to send.";
+    body.appendChild(pagesHint);
+    function updatePagesHint() { pagesHint.style.display = inputModeSelect.value === "pages" ? "" : "none"; }
+    inputModeSelect.addEventListener("change", updatePagesHint);
+    updatePagesHint();
 
     // Tag language
     body.appendChild(makeDivider());
@@ -189,6 +406,19 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     skipHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
     skipHint.innerText = "Books already having this many tags will be skipped.";
     body.appendChild(skipHint);
+
+    // Max tags per book
+    body.appendChild(makeDivider());
+    body.appendChild(makeLabel("Max tags per book"));
+    const maxTagsInput = makeInput("number", String(settings.max_tags ?? 5), "5");
+    maxTagsInput.min = "1";
+    maxTagsInput.max = "20";
+    maxTagsInput.style.width = "80px";
+    body.appendChild(maxTagsInput);
+    const maxTagsHint = document.createElement("div");
+    maxTagsHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    maxTagsHint.innerText = "The AI suggests at most this many tags for each book.";
+    body.appendChild(maxTagsHint);
 
     // Tag vocabulary
     body.appendChild(makeDivider());
@@ -237,12 +467,18 @@ export async function renderAiSettingsSection(container, ctx = {}) {
             provider: providerSelect.value,
             openai_api_key: apiKeyInput.value.trim(),
             openai_model: openaiModelSelect.value,
+            gemini_api_key: geminiKeyInput.value.trim(),
+            // Giữ model cũ nếu danh sách chưa load được
+            gemini_model: geminiModelSelect.value || settings.gemini_model || "",
+            // Giữ model cũ nếu catalog chưa load được
+            chatgpt_model: chatgptModelSelect.value || settings.chatgpt_model || "",
             ollama_host: ollamaHostInput.value.trim(),
             ollama_model: ollamaModelInput.value.trim(),
             input_mode: inputModeSelect.value,
             tag_language: langSelect.value,
             tag_vocabulary: vocabTags,
             skip_if_tags_gte: parseInt(skipInput.value) || 5,
+            max_tags: Math.min(20, Math.max(1, parseInt(maxTagsInput.value) || 5)),
         };
     }
 
@@ -283,6 +519,27 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     if (settings.provider === "openai" && !settings.openai_api_key) {
         alert("OpenAI API key is not set. Please configure in AI Settings.");
         return;
+    }
+    if (settings.provider === "gemini" || settings.provider === "gemini_free") {
+        if (!settings.gemini_api_key) {
+            alert("Gemini API key is not set. Please configure in AI Settings.");
+            return;
+        }
+        if (!settings.gemini_model) {
+            alert("No Gemini model selected. Please choose one in AI Settings and save.");
+            return;
+        }
+    }
+    if (settings.provider === "chatgpt") {
+        const status = await api.chatgptStatus().catch(() => ({ signed_in: false }));
+        if (!status.signed_in) {
+            alert("Not signed in to ChatGPT. Please sign in under Settings > AI Settings.");
+            return;
+        }
+        if (!settings.chatgpt_model) {
+            alert("No ChatGPT model selected. Please choose one in AI Settings and save.");
+            return;
+        }
     }
 
     const BATCH_SIZE = 20;
@@ -335,8 +592,8 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     costBox.style.cssText = "background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:12px; color:var(--text-secondary);";
 
     function updateCostEstimate() {
-        // Ẩn cost box khi dùng Ollama
-        if (settings.provider === "ollama") {
+        // Ẩn cost box khi dùng Ollama (free), ChatGPT (tính vào plan) hoặc Gemini trả phí (giá tùy model)
+        if (settings.provider === "ollama" || settings.provider === "chatgpt" || settings.provider === "gemini") {
             costBox.style.display = "none";
             return;
         }
@@ -349,11 +606,22 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         else books = allBooks;
 
         const eligible = books.filter(b => (b.tags?.length || 0) < settings.skip_if_tags_gte);
+
+        // Gemini free tier: no cost, but time (~6.5 s per book) and a daily limit
+        if (settings.provider === "gemini_free") {
+            const minutes = Math.ceil((eligible.length * 6.5) / 60);
+            costBox.innerHTML = `<b>Gemini free tier:</b> ~${eligible.length} books · about ${minutes} min (one book every ~6 seconds${settings.input_mode === "pages" ? ", plus page rendering; long books can also hit the per-minute token limit" : ""})` +
+                (eligible.length > 1000 ? "<br>⚠️ More than the ~1,000 requests per day the free tier usually allows — the run will stop when the daily limit is reached." : "");
+            return;
+        }
         const { totalTokens, cost } = estimateCost(eligible.length, settings.input_mode);
 
         let costText = `~${eligible.length} books · ~${totalTokens.toLocaleString()} tokens · Est. cost: $${cost}`;
         if (settings.input_mode === "thumbnail") {
             costText += " ⚠️ Thumbnail mode costs more";
+        } else if (settings.input_mode === "pages") {
+            // Số trang chưa biết trước — mỗi trang tốn gần bằng 1 ảnh bìa
+            costText = `~${eligible.length} books · cost depends on page count (each page costs about as much as one cover image)`;
         }
 
         costBox.innerHTML = `<b>Estimate:</b> ${costText}<br>
@@ -434,6 +702,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 
         const total = eligible.length;
         let processed = 0;
+        let runError = null;
 
         for (let i = 0; i < eligible.length; i += BATCH_SIZE) {
             const batch = eligible.slice(i, i + BATCH_SIZE);
@@ -452,13 +721,19 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
                 processed += batch.length;
                 progressFill.style.width = `${Math.round((processed / total) * 100)}%`;
             } catch (err) {
-                statusText.innerText = `Error: ${err}`;
-                statusText.style.color = "var(--danger)";
+                runError = err;
                 break;
             }
         }
 
-        statusText.innerText = `Done! ${allSuggestions.filter(s => !s.error).length}/${total} books tagged.`;
+        const taggedCount = allSuggestions.filter(s => !s.error).length;
+        if (runError) {
+            // Show the error (it used to be overwritten right away by "Done!")
+            statusText.innerText = `Stopped: ${runError} (${taggedCount}/${total} books tagged)`;
+            statusText.style.color = "var(--danger)";
+        } else {
+            statusText.innerText = `Done! ${taggedCount}/${total} books tagged.`;
+        }
         progressFill.style.width = "100%";
         startBtn.style.display = "none";
         applyBtn.style.display = "";

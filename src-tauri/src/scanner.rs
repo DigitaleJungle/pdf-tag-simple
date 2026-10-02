@@ -440,6 +440,20 @@ pub fn render_pdf_page(
         }
     }
 
+    let bytes = render_page_jpeg(app_handle, pdf_path, page_index, target_width)?;
+
+    crate::page_cache::store(app_handle, &cache_settings, pdf_path, page_index, target_width, &bytes);
+
+    Ok(bytes)
+}
+
+// Render 1 trang ra JPEG, không đọc/ghi page cache trên disk
+fn render_page_jpeg(
+    app_handle: &tauri::AppHandle,
+    pdf_path: &str,
+    page_index: u16,
+    target_width: i32,
+) -> Result<Vec<u8>, String> {
     let pdfium = get_pdfium(app_handle)?;
     let mut cache = doc_cache().lock().map_err(|e| e.to_string())?;
     let doc = cache.get_or_load(pdfium, pdf_path)?;
@@ -453,8 +467,19 @@ pub fn render_pdf_page(
         .as_image()
         .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
         .map_err(|e| e.to_string())?;
-
-    crate::page_cache::store(app_handle, &cache_settings, pdf_path, page_index, target_width, &bytes);
-
     Ok(bytes)
+}
+
+// AI tagging ("Filename + all pages"): render mọi trang ở độ rộng nhỏ.
+// Không ghi vào page cache của reader — các bản render nhỏ này reader không dùng.
+// Lock doc cache theo từng trang để reader không phải chờ cả quyển.
+pub fn render_all_pages_jpeg(
+    app_handle: &tauri::AppHandle,
+    pdf_path: &str,
+    target_width: i32,
+) -> Result<Vec<Vec<u8>>, String> {
+    let page_count = get_pdf_page_count(app_handle, pdf_path)?;
+    (0..page_count)
+        .map(|index| render_page_jpeg(app_handle, pdf_path, index, target_width))
+        .collect()
 }
