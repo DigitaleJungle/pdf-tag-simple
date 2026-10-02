@@ -13,6 +13,7 @@ let gridState = {
     displayCount: 0,
     pageSize: 50,
     viewMode: "library",
+    detailed: false,      // true = card ngang có short description
     cardMap: {},
     lastClickedIndex: -1  // Lưu index card click lần trước để shift select
 };
@@ -21,7 +22,7 @@ export function renderAssetGrid(
     container, books, filterPath, search, sort, selectedTags,
     onGridUpdate, viewMode = "library",
     selectedBooks = new Set(), onToggleSelect = null, clickBehavior = "select",
-    untaggedOnly = false
+    untaggedOnly = false, showShortDescription = false
 ) {
     if (observer) observer.disconnect();
 
@@ -29,6 +30,8 @@ export function renderAssetGrid(
     gridState.filteredBooks = applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly);
     gridState.displayCount = 0;
     gridState.viewMode = viewMode;
+    gridState.detailed = showShortDescription;
+    container.classList.toggle("asset-grid--detailed", showShortDescription);
     gridState.cardMap = {};
     gridState.lastClickedIndex = -1;
     container.innerHTML = "";
@@ -45,7 +48,7 @@ export function renderAssetGrid(
 }
 
 function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior) {
-    const { container, filteredBooks, displayCount, pageSize, viewMode } = gridState;
+    const { container, filteredBooks, displayCount, pageSize, viewMode, detailed } = gridState;
     const end = Math.min(displayCount + pageSize, filteredBooks.length);
 
     for (let i = displayCount; i < end; i++) {
@@ -65,7 +68,8 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehav
                 const isBulk = selectedBooks.size > 1 && selectedBooks.has(editedBook.path);
                 if (isBulk) openBulkTagModal([...selectedBooks], onGridUpdate);
                 else openEditModal(editedBook, onGridUpdate);
-            }
+            },
+            detailed
         );
 
         gridState.cardMap[book.path] = card;
@@ -145,7 +149,10 @@ function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnl
     // 2. Filter theo search
     if (search && search.trim()) {
         const q = search.trim().toLowerCase();
-        result = result.filter(b => b.file_name.toLowerCase().includes(q));
+        result = result.filter(b =>
+            b.file_name.toLowerCase().includes(q) ||
+            (b.short_description || "").toLowerCase().includes(q) ||
+            (b.description || "").toLowerCase().includes(q));
     }
 
     // 3. Filter theo tags (AND logic) — hoặc chỉ lấy sách chưa có tag nào,

@@ -7,6 +7,8 @@ import { renderAiSettingsSection } from "./f_ai.js";
 //   openSettings(ctx)   — mở modal settings (sidebar trái + panel phải)
 //     ctx.clickBehavior       — "select" | "open-default" | "open-reader"
 //     ctx.onClickBehaviorChange(value) — gọi khi user đổi Click behaviour
+//     ctx.showShortDescription — bool, card ngang có short description
+//     ctx.onShowShortDescriptionChange(value) — gọi khi user bật/tắt checkbox đó
 //     ctx.onAddPath()         — gọi khi user bấm "Add Path"
 //     ctx.onRemovePath(path)  — gọi sau khi user xác nhận xóa 1 path
 //     ctx.getFolders()        — trả về Promise<string[]> danh sách path hiện có
@@ -225,6 +227,32 @@ async function renderGeneralSection(container, ctx) {
     clickGroup.appendChild(select);
     clickGroup.appendChild(hint);
     wrap.appendChild(clickGroup);
+
+    // --- Overview ---
+    const overviewGroup = document.createElement("div");
+    overviewGroup.style.cssText = "display:flex; flex-direction:column; gap:8px;";
+    overviewGroup.appendChild(makeLabel("Overview"));
+
+    const shortDescRow = document.createElement("label");
+    shortDescRow.style.cssText = "display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); cursor:pointer;";
+    const shortDescCheckbox = document.createElement("input");
+    shortDescCheckbox.type = "checkbox";
+    shortDescCheckbox.checked = !!ctx.showShortDescription;
+    shortDescCheckbox.addEventListener("change", () => {
+        if (typeof ctx.onShowShortDescriptionChange === "function") {
+            ctx.onShowShortDescriptionChange(shortDescCheckbox.checked);
+        }
+    });
+    shortDescRow.appendChild(shortDescCheckbox);
+    shortDescRow.appendChild(document.createTextNode("Show short description"));
+
+    const shortDescHint = document.createElement("div");
+    shortDescHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    shortDescHint.innerText = "Shows larger cards: cover on the left, with the title, star, tags and short description next to it.";
+
+    overviewGroup.appendChild(shortDescRow);
+    overviewGroup.appendChild(shortDescHint);
+    wrap.appendChild(overviewGroup);
 
     // --- Page cache (reader) ---
     const cacheGroup = document.createElement("div");

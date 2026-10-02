@@ -24,7 +24,8 @@ let state = {
     currentSort: "name-asc", // Kiểu sắp xếp
     viewMode: "library",     // "library" | "trash"
     selectedBooks: new Set(), // Set<path> — sách đang được multi-select
-    clickBehavior: localStorage.getItem("clickBehavior") || "select" // "select" | "open-default" | "open-reader"
+    clickBehavior: localStorage.getItem("clickBehavior") || "select", // "select" | "open-default" | "open-reader"
+    showShortDescription: localStorage.getItem("showShortDescription") === "true" // card ngang có short description
 };
 window.__DEBUG_STATE__ = state;
 // ==========================================
@@ -331,6 +332,12 @@ window.addEventListener("DOMContentLoaded", async () => {
                 updateSelectionUI();
                 updateGrid();
             },
+            showShortDescription: state.showShortDescription,
+            onShowShortDescriptionChange: (value) => {
+                state.showShortDescription = value;
+                localStorage.setItem("showShortDescription", String(value));
+                updateGrid();
+            },
             onAddPath: addPath,
             onRemovePath: removePath,
             getFolders: () => api.getFolders(),
@@ -594,7 +601,8 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.selectedBooks,
             (path, shiftKey) => toggleSelectBook(path, shiftKey),
             state.clickBehavior,
-            state.untaggedOnly
+            state.untaggedOnly,
+            state.showShortDescription
         );
 
         persistLastFilters();

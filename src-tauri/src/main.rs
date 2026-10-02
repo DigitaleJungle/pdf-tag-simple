@@ -45,8 +45,10 @@ fn update_book_info(
     book_path: String,
     new_name: String,
     new_tags: Vec<String>,
+    new_description: Option<String>,
+    new_short_description: Option<String>,
 ) -> Result<String, String> {
-    db::update_book_info(app_handle, book_path, new_name, new_tags)
+    db::update_book_info(app_handle, book_path, new_name, new_tags, new_description, new_short_description)
 }
 
 #[tauri::command]

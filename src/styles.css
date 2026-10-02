@@ -449,6 +449,11 @@ a { color: var(--primary); text-decoration: none; }
   align-content: flex-start;
 }
 
+/* "Show short description" — card ngang, rộng hơn */
+.asset-grid.asset-grid--detailed {
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+}
+
 /* Card — inline styles từ JS sẽ dần migrate sang đây */
 /* Hiện tại dùng class .book-card khi refactor JS */
 .book-card {

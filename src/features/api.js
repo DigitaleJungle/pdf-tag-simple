@@ -10,8 +10,13 @@ export const api = {
     removeFolder: (path) => invoke("remove_library_folder", { folderPath: path }),
     updateDatabase: () => invoke("update_database"),
 
-    updateBook: (path, name, tags) =>
-        invoke("update_book_info", { bookPath: path, newName: name, newTags: tags }),
+    // description / shortDescription bỏ trống (undefined) → backend giữ nguyên giá trị cũ
+    updateBook: (path, name, tags, description, shortDescription) =>
+        invoke("update_book_info", {
+            bookPath: path, newName: name, newTags: tags,
+            newDescription: description ?? null,
+            newShortDescription: shortDescription ?? null,
+        }),
 
     exportDB: (path) => invoke("export_database", { savePath: path }),
     importDB: (path) => invoke("import_database", { sourcePath: path }),

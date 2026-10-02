@@ -35,6 +35,12 @@ pub struct BookEntry {
     // Sách starred luôn hiện đầu grid bất chấp sort
     #[serde(default)]
     pub starred: bool,
+    // description: free-form notes about the book (empty = none)
+    #[serde(default)]
+    pub description: String,
+    // short_description: one-line summary (empty = none)
+    #[serde(default)]
+    pub short_description: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -257,13 +263,16 @@ pub fn get_all_tags(app_handle: tauri::AppHandle) -> Result<Vec<serde_json::Valu
     Ok(result)
 }
 
-// Cập nhật tên hiển thị và tags của 1 sách
-// Gọi từ modal "Đổi tên & Tags" trong frontend
+// Cập nhật tên hiển thị, tags và description của 1 sách
+// Gọi từ modal "Edit details" trong frontend
+// new_description / new_short_description = None → giữ nguyên giá trị cũ (bulk tag edit, AI auto-tag)
 pub fn update_book_info(
     app_handle: tauri::AppHandle,
     book_path: String,
     new_name: String,
     new_tags: Vec<String>,
+    new_description: Option<String>,
+    new_short_description: Option<String>,
 ) -> Result<String, String> {
     let db_path = app_dir(&app_handle)?.join("library_books.json");
     if !db_path.exists() {
@@ -282,6 +291,12 @@ pub fn update_book_info(
     if let Some(book) = db.books.iter_mut().find(|b| b.path == book_path) {
         book.file_name = new_name;
         book.tags = new_tags;
+        if let Some(desc) = new_description {
+            book.description = desc;
+        }
+        if let Some(short) = new_short_description {
+            book.short_description = short;
+        }
 
         std::fs::write(
             &db_path,

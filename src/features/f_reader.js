@@ -497,7 +497,7 @@ export async function openReader(book, initialPage = null) {
                 action: async () => await api.revealInExplorer(currentBook.path)
             },
             {
-                label: "Edit name & Tags",
+                label: "Edit details",
                 action: () => {
                     if (!window.__APP_ACTIONS__?.editBook) return;
                     window.__APP_ACTIONS__.editBook(currentBook, (updated) => {

@@ -14,8 +14,11 @@ import { api } from "./api.js";
 //                     "open-reader" (click mở ngay trong reader, double-click vô hiệu)
 //   onEditBook     — callback khi double click trong Manage mode ("select") — mở
 //                    modal "Edit name & Tags" thay vì mở reader
+//   detailed       — true = card ngang, lớn hơn (setting "Show short description"):
+//                    bìa bên trái; bên phải title, star, tags (góc trên phải)
+//                    và short description
 // =============================================
-export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, clickBehavior = "select", onEditBook = null) {
+export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, clickBehavior = "select", onEditBook = null, detailed = false) {
     const card = document.createElement("div");
 
     // Hàm apply style theo trạng thái selected/unselected
@@ -23,8 +26,8 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
         card.style.cssText = `
             border: none;
             padding: 10px;
-            width: 130px;
-            text-align: center;
+            ${detailed ? "box-sizing: border-box; height: 160px; gap: 12px;" : "width: 130px;"}
+            text-align: ${detailed ? "left" : "center"};
             border-radius: 10px;
             cursor: pointer;
             background: var(--panel);
@@ -35,7 +38,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
             transition: box-shadow 0.15s, transform 0.15s;
             user-select: none;
             display: flex;
-            flex-direction: column;
+            flex-direction: ${detailed ? "row" : "column"};
             position: relative;
         `;
     }
@@ -70,9 +73,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
 
     const starBtn = document.createElement("div");
     starBtn.style.cssText = `
-        position: absolute;
-        top: 4px;
-        right: 6px;
+        ${detailed ? "align-self: flex-start;" : "position: absolute; top: 4px; right: 6px;"}
         font-size: 14px;
         cursor: pointer;
         z-index: 1;
@@ -82,7 +83,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     `;
     starBtn.innerText = "⭐";
     starBtn.title = starred ? "Unstar" : "Star";
-    card.appendChild(starBtn);
+    if (!detailed) card.appendChild(starBtn);
 
     starBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -109,12 +110,13 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     thumbArea.style.cssText = `
         background: var(--hover);
         height: 140px;
+        ${detailed ? "width: 100px;" : ""}
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         border-radius: 6px;
-        margin-bottom: 8px;
+        margin-bottom: ${detailed ? "0" : "8px"};
         overflow: hidden;
         flex-shrink: 0;
         color: var(--text-secondary);
@@ -125,19 +127,22 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     // --- Title ---
     const title = document.createElement("p");
     title.style.cssText = `
-        font-size: 12px;
-        margin: 5px 0 6px;
+        font-size: ${detailed ? "13px" : "12px"};
+        margin: ${detailed ? "0 0 4px" : "5px 0 6px"};
         line-height: 1.25;
-        height: 30px;
+        ${detailed ? "" : "height: 30px;"}
         overflow: hidden;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
-        text-align: center;
-        font-weight: 500;
+        text-align: ${detailed ? "left" : "center"};
+        font-weight: ${detailed ? "600" : "500"};
         color: var(--text);
+        ${detailed ? "overflow-wrap: anywhere;" : ""}
     `;
     title.innerText = book.file_name;
+    // Hover tooltip: tên đầy đủ + short description + description (nếu có)
+    title.title = [book.file_name, book.short_description, book.description].filter(Boolean).join("\n\n");
 
     // --- Tags ---
     const tagsWrap = document.createElement("div");
@@ -145,10 +150,9 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
-        justify-content: center;
+        justify-content: ${detailed ? "flex-end" : "center"};
         align-content: flex-start;
-        min-height: 36px;
-        max-height: 36px;
+        ${detailed ? "flex: 0 1 auto; max-width: 45%; max-height: 56px;" : "min-height: 36px; max-height: 36px;"}
         overflow: hidden;
     `;
 
@@ -166,7 +170,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
             border-radius: 10px;
             background: var(--primary-soft);
             color: var(--primary);
-            max-width: 52px;
+            max-width: ${detailed ? "90px" : "52px"};
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -189,8 +193,42 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     }
 
     card.appendChild(thumbArea);
-    card.appendChild(title);
-    card.appendChild(tagsWrap);
+    if (detailed) {
+        // Bên phải bìa: [title + star | tags] ở trên, short description bên dưới
+        const info = document.createElement("div");
+        info.style.cssText = "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;";
+
+        const topRow = document.createElement("div");
+        topRow.style.cssText = "display: flex; align-items: flex-start; gap: 8px;";
+        const titleCol = document.createElement("div");
+        titleCol.style.cssText = "flex: 1; min-width: 0; display: flex; flex-direction: column;";
+        titleCol.appendChild(title);
+        titleCol.appendChild(starBtn);
+        topRow.appendChild(titleCol);
+        topRow.appendChild(tagsWrap);
+        info.appendChild(topRow);
+
+        if (book.short_description) {
+            const shortDesc = document.createElement("p");
+            shortDesc.style.cssText = `
+                margin: 0;
+                font-size: 12px;
+                line-height: 1.35;
+                color: var(--text-secondary);
+                overflow: hidden;
+                display: -webkit-box;
+                -webkit-line-clamp: 4;
+                -webkit-box-orient: vertical;
+                overflow-wrap: anywhere;
+            `;
+            shortDesc.innerText = book.short_description;
+            info.appendChild(shortDesc);
+        }
+        card.appendChild(info);
+    } else {
+        card.appendChild(title);
+        card.appendChild(tagsWrap);
+    }
 
     // --- Lazy load thumbnail ---
     let loaded = false;

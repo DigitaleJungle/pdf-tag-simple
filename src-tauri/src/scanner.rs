@@ -183,6 +183,8 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
         let hidden = old.map(|b| b.hidden).unwrap_or(false);
         // Giữ nguyên trạng thái starred — không reset khi Update Database
         let starred = old.map(|b| b.starred).unwrap_or(false);
+        let description = old.map(|b| b.description.clone()).unwrap_or_default();
+        let short_description = old.map(|b| b.short_description.clone()).unwrap_or_default();
 
         let thumb_path = cache_dir.join(generate_thumb_name(&pdf_str));
         let thumb_str = thumb_path.to_string_lossy().to_string();
@@ -195,6 +197,8 @@ pub fn perform_update_database(app_handle: tauri::AppHandle) -> Result<String, S
             date_added,
             hidden,
             starred,
+            description,
+            short_description,
         });
     }
 

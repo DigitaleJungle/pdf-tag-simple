@@ -77,7 +77,7 @@ export function showCardContextMenu(x, y, book, onUpdateSuccess, viewMode = "lib
           action: () => openBulkTagModal([...selectedBooks], onUpdateSuccess)
         }
       : {
-          label: "Edit name & Tags",
+          label: "Edit details",
           action: () => openEditModal(book, onUpdateSuccess)
         }
   ];
@@ -495,7 +495,7 @@ function createTagEditor(tagList, bgColor, textColor, borderColor, allTagNames =
 }
 
 // =============================================
-// SINGLE EDIT MODAL — sửa tên + tags 1 sách
+// SINGLE EDIT MODAL — sửa tên + tags + description 1 sách
 // =============================================
 export async function openEditModal(book, onSave) {
     document.querySelectorAll(".edit-book-overlay").forEach(el => el.remove());
@@ -505,6 +505,8 @@ export async function openEditModal(book, onSave) {
 
     let currentName = book.file_name || "";
     let currentTags = Array.isArray(book.tags) ? [...book.tags] : [];
+    let currentDescription = book.description || "";
+    let currentShortDescription = book.short_description || "";
 
     const overlay = document.createElement("div");
     overlay.className = "edit-book-overlay";
@@ -529,7 +531,7 @@ export async function openEditModal(book, onSave) {
 
     const titleWrap = document.createElement("div");
     titleWrap.innerHTML = `
-        <div style="font-size:18px;font-weight:700;color:var(--text);">Edit name & Tags</div>
+        <div style="font-size:18px;font-weight:700;color:var(--text);">Edit details</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Click x on a chip to remove a tag.</div>
     `;
 
@@ -569,6 +571,47 @@ export async function openEditModal(book, onSave) {
     tagBlock.appendChild(tagEditor.wrap);
     tagBlock.appendChild(tagEditor.helper("Tab to add a tag. Enter to save. Backspace on empty input to remove last tag."));
 
+    const shortDescBlock = document.createElement("div");
+    shortDescBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text);">Short description</div>`;
+
+    const shortDescInput = document.createElement("input");
+    shortDescInput.type = "text";
+    shortDescInput.value = currentShortDescription;
+    shortDescInput.placeholder = "One-line summary...";
+    shortDescInput.style.cssText = nameInput.style.cssText;
+    shortDescInput.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+            e.stopPropagation();
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            handleSave();
+        }
+    });
+    shortDescBlock.appendChild(shortDescInput);
+
+    const descBlock = document.createElement("div");
+    descBlock.innerHTML = `<div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text);">Description</div>`;
+
+    const descInput = document.createElement("textarea");
+    descInput.value = currentDescription;
+    descInput.rows = 4;
+    descInput.placeholder = "Notes about this book...";
+    descInput.style.cssText = "width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; outline:none; box-sizing:border-box; background:var(--panel); color:var(--text); font-family:inherit; resize:vertical; min-height:80px;";
+    descInput.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+            e.stopPropagation();
+        } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            // Plain Enter inserts a newline here; Ctrl+Enter saves.
+            e.preventDefault();
+            handleSave();
+        }
+    });
+    descBlock.appendChild(descInput);
+    const descHelper = document.createElement("div");
+    descHelper.style.cssText = "font-size:12px;color:var(--text-secondary);margin-top:6px;";
+    descHelper.innerText = "Ctrl+Enter to save.";
+    descBlock.appendChild(descHelper);
+
     const footer = document.createElement("div");
     footer.style.cssText = "padding:14px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:var(--panel-soft);";
 
@@ -595,7 +638,9 @@ export async function openEditModal(book, onSave) {
                 .filter((tag, index, arr) => arr.findIndex(t => t.toLowerCase() === tag.toLowerCase()) === index);
             saveBtn.disabled = true;
             saveBtn.innerText = "Saving...";
-            await api.updateBook(book.path, newName, cleanTags);
+            const newDescription = descInput.value.trim();
+            const newShortDescription = shortDescInput.value.trim();
+            await api.updateBook(book.path, newName, cleanTags, newDescription, newShortDescription);
             closeModal();
             if (typeof onSave === "function") onSave();
         } catch (err) {
@@ -625,6 +670,8 @@ export async function openEditModal(book, onSave) {
     footer.appendChild(saveBtn);
     body.appendChild(nameBlock);
     body.appendChild(tagBlock);
+    body.appendChild(shortDescBlock);
+    body.appendChild(descBlock);
     modal.appendChild(header);
     modal.appendChild(body);
     modal.appendChild(footer);
