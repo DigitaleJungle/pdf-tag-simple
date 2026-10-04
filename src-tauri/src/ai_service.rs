@@ -274,7 +274,7 @@ fn build_prompt(
         tasks.push("Write a longer description: one paragraph of 3-6 sentences about the book's subject, contents and intended reader.".to_string());
     }
     if want.any_text() {
-        let source = if image_note.is_empty() { "the filename" } else { "the filename and the attached images" };
+        let source = if image_note.is_empty() { "the filename" } else { "the filename and the provided content" };
         rules.push(format!(
             "- Descriptions: only state what you can tell from {}. Don't invent specific details such as authors, dates or plot points. If the content is unclear, keep it general.",
             source
@@ -371,12 +371,99 @@ async fn pages_to_base64(app_handle: &tauri::AppHandle, pdf_path: &str) -> Resul
     let total: usize = images.iter().map(String::len).sum();
     if total > MAX_PAGES_PAYLOAD_BYTES {
         return Err(format!(
-            "This PDF has too many pages to send at once ({} pages, ~{} MB). Use \"Filename + cover image\" for books this long.",
+            "This PDF has too many pages to send at once ({} pages, ~{} MB). Use \"Filename + PDF text\" for books this long.",
             images.len(),
             total / (1024 * 1024)
         ));
     }
     Ok(images)
+}
+
+// ===== PDF FILE / PDF TEXT =====
+
+// Gemini nhận PDF inline tới 50 MB, OpenAI tới 50 MB/file — giữ dưới mức đó (base64 to hơn ~33%)
+const MAX_PDF_FILE_BYTES: u64 = 30 * 1024 * 1024;
+// ~25k tokens — đủ để tag/mô tả, giữ chi phí và context của model hợp lý
+const MAX_PDF_TEXT_CHARS: usize = 100_000;
+
+// PDF gốc gửi kèm ("Filename + PDF file")
+struct PdfAttachment {
+    filename: String,
+    base64: String,
+}
+
+async fn pdf_to_base64(pdf_path: &str) -> Result<PdfAttachment, String> {
+    let size = std::fs::metadata(pdf_path)
+        .map_err(|e| format!("Could not read the PDF: {}", e))?
+        .len();
+    if size > MAX_PDF_FILE_BYTES {
+        return Err(format!(
+            "This PDF is too large to send ({} MB, limit {} MB). Use \"Filename + PDF text\" for this book.",
+            size / (1024 * 1024),
+            MAX_PDF_FILE_BYTES / (1024 * 1024)
+        ));
+    }
+    let filename = std::path::Path::new(pdf_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "book.pdf".to_string());
+    let path = pdf_path.to_string();
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Could not read the PDF: {}", e))?;
+    Ok(PdfAttachment { filename, base64: general_purpose::STANDARD.encode(bytes) })
+}
+
+// Text layer của PDF, cắt ở MAX_PDF_TEXT_CHARS. Trả về (text, đã bị cắt?)
+async fn pdf_text(app_handle: &tauri::AppHandle, pdf_path: &str) -> Result<(String, bool), String> {
+    let app = app_handle.clone();
+    let path = pdf_path.to_string();
+    let text = tokio::task::spawn_blocking(move || crate::scanner::extract_pdf_text(&app, &path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Could not read the PDF text: {}", e))?;
+    if text.chars().filter(|c| !c.is_whitespace()).count() < 50 {
+        return Err("This PDF has (almost) no text — it's probably scanned. Use \"Filename + all pages\" or \"Filename + PDF file\" for this book.".to_string());
+    }
+    if text.chars().count() > MAX_PDF_TEXT_CHARS {
+        return Ok((text.chars().take(MAX_PDF_TEXT_CHARS).collect(), true));
+    }
+    Ok((text, false))
+}
+
+// Nội dung gửi kèm theo input_mode: (ảnh, PDF gốc, ghi chú đặt vào prompt)
+async fn prepare_content(
+    app_handle: &tauri::AppHandle,
+    input_mode: &str,
+    book: &BookToTag,
+) -> Result<(Vec<String>, Option<PdfAttachment>, String), String> {
+    match input_mode {
+        "thumbnail" => {
+            let images: Vec<String> = thumbnail_to_base64(&book.thumbnail_path).into_iter().collect();
+            let note = if images.is_empty() { String::new() } else { "The attached image is the book's cover.\n".to_string() };
+            Ok((images, None, note))
+        }
+        "pages" => {
+            let images = pages_to_base64(app_handle, &book.path).await?;
+            let note = format!("The attached images are the pages of the PDF, in order ({} pages).\n", images.len());
+            Ok((images, None, note))
+        }
+        "pdf" => {
+            let pdf = pdf_to_base64(&book.path).await?;
+            Ok((Vec::new(), Some(pdf), "The PDF file itself is attached.\n".to_string()))
+        }
+        "text" => {
+            let (text, truncated) = pdf_text(app_handle, &book.path).await?;
+            let note = format!(
+                "Text extracted from the PDF{}:\n<<<\n{}\n>>>\n",
+                if truncated { " (first part only)" } else { "" },
+                text.trim_end()
+            );
+            Ok((Vec::new(), None, note))
+        }
+        _ => Ok((Vec::new(), None, String::new())),
+    }
 }
 
 // Bỏ trùng (không phân biệt hoa thường) và cắt theo max_tags — phòng khi AI trả nhiều hơn yêu cầu
@@ -451,8 +538,14 @@ async fn call_openai(
     model: &str,
     prompt: &str,
     images: &[String],
+    pdf: Option<&PdfAttachment>,
     max_output_tokens: u32,
 ) -> Result<String, String> {
+    // PDF gốc: Chat Completions không nhận PDF base64 → dùng Responses API
+    if let Some(pdf) = pdf {
+        return call_openai_with_pdf(api_key, model, prompt, pdf, max_output_tokens).await;
+    }
+
     let client = reqwest::Client::new();
 
     // Build message content — ảnh (bìa hoặc các trang, theo thứ tự) + text
@@ -506,6 +599,62 @@ async fn call_openai(
         .unwrap_or("");
 
     Ok(text.to_string())
+}
+
+// OpenAI Responses API với PDF gốc (input_file, base64 data URL)
+async fn call_openai_with_pdf(
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    pdf: &PdfAttachment,
+    max_output_tokens: u32,
+) -> Result<String, String> {
+    let body = serde_json::json!({
+        "model": model,
+        "input": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_file",
+                    "filename": pdf.filename,
+                    "file_data": format!("data:application/pdf;base64,{}", pdf.base64)
+                },
+                { "type": "input_text", "text": prompt }
+            ]
+        }],
+        "max_output_tokens": max_output_tokens
+    });
+
+    let response = reqwest::Client::new()
+        .post("https://api.openai.com/v1/responses")
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("OpenAI request failed: {}", e))?;
+
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("OpenAI error {}: {}", status, text));
+    }
+    let data: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("Parse response failed: {}", e))?;
+
+    // output[] → message → content[] → output_text
+    let answer: String = data["output"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item["type"].as_str() == Some("message"))
+                .flat_map(|item| item["content"].as_array().cloned().unwrap_or_default())
+                .filter(|c| c["type"].as_str() == Some("output_text"))
+                .filter_map(|c| c["text"].as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default();
+    Ok(answer)
 }
 
 // ===== GEMINI =====
@@ -683,11 +832,15 @@ async fn call_gemini(
     model: &str,
     prompt: &str,
     images: &[String],
+    pdf: Option<&PdfAttachment>,
     free_tier: bool,
 ) -> Result<String, (String, bool)> {
     let mut parts = vec![serde_json::json!({ "text": prompt })];
     for b64 in images {
         parts.push(serde_json::json!({ "inlineData": { "mimeType": "image/jpeg", "data": b64 } }));
+    }
+    if let Some(pdf) = pdf {
+        parts.push(serde_json::json!({ "inlineData": { "mimeType": "application/pdf", "data": pdf.base64 } }));
     }
     let body = serde_json::json!({ "contents": [{ "role": "user", "parts": parts }] });
     let url = format!("{}/models/{}:generateContent", GEMINI_BASE, model);
@@ -778,6 +931,7 @@ async fn call_chatgpt(
     model: &str,
     prompt: &str,
     images: &[String],
+    pdf: Option<&PdfAttachment>,
 ) -> Result<String, String> {
     let mut content: Vec<serde_json::Value> = images
         .iter()
@@ -787,6 +941,13 @@ async fn call_chatgpt(
             "detail": "low"
         }))
         .collect();
+    if let Some(pdf) = pdf {
+        content.push(serde_json::json!({
+            "type": "input_file",
+            "filename": pdf.filename,
+            "file_data": format!("data:application/pdf;base64,{}", pdf.base64)
+        }));
+    }
     content.push(serde_json::json!({ "type": "input_text", "text": prompt }));
 
     let body = serde_json::json!({
@@ -925,6 +1086,9 @@ pub async fn suggest_tags_batch(
     if settings.provider == "chatgpt" && settings.chatgpt_model.is_empty() {
         return Err("No ChatGPT model selected. Please choose one in AI Settings.".to_string());
     }
+    if settings.provider == "ollama" && settings.input_mode == "pdf" {
+        return Err("Ollama can't read PDF files. Choose \"Filename + PDF text\" as Input Mode in AI Settings.".to_string());
+    }
 
     let mut results = Vec::new();
 
@@ -941,22 +1105,13 @@ pub async fn suggest_tags_batch(
         // Đủ chỗ cho description dài; chỉ tags thì giữ giới hạn nhỏ như trước
         let max_output_tokens = if want.any_text() { 1500 } else { 100 };
 
-        // Ảnh gửi kèm theo input_mode: không có / ảnh bìa / mọi trang
-        let images: Vec<String> = match settings.input_mode.as_str() {
-            "thumbnail" => thumbnail_to_base64(&book.thumbnail_path).into_iter().collect(),
-            "pages" => match pages_to_base64(&app_handle, &book.path).await {
-                Ok(pages) => pages,
-                Err(e) => {
-                    results.push(AiTagSuggestion::failed(book.path, book.file_name, e));
-                    continue;
-                }
-            },
-            _ => Vec::new(),
-        };
-        let image_note = match (settings.input_mode.as_str(), images.len()) {
-            (_, 0) => String::new(),
-            ("pages", n) => format!("The attached images are the pages of the PDF, in order ({} pages).\n", n),
-            _ => "The attached image is the book's cover.\n".to_string(),
+        // Nội dung gửi kèm theo input_mode: không có / ảnh bìa / mọi trang / PDF gốc / text
+        let (images, pdf, source_note) = match prepare_content(&app_handle, &settings.input_mode, &book).await {
+            Ok(content) => content,
+            Err(e) => {
+                results.push(AiTagSuggestion::failed(book.path, book.file_name, e));
+                continue;
+            }
         };
 
         let prompt = build_prompt(
@@ -964,7 +1119,7 @@ pub async fn suggest_tags_batch(
             &settings.tag_vocabulary,
             &settings.tag_language,
             settings.max_tags,
-            &image_note,
+            &source_note,
             want,
             &options.extra_prompt,
         );
@@ -976,6 +1131,7 @@ pub async fn suggest_tags_batch(
                     &settings.openai_model,
                     &prompt,
                     &images,
+                    pdf.as_ref(),
                     max_output_tokens,
                 )
                 .await
@@ -985,6 +1141,7 @@ pub async fn suggest_tags_batch(
                 &settings.gemini_model,
                 &prompt,
                 &images,
+                pdf.as_ref(),
                 settings.provider == "gemini_free",
             )
             .await
@@ -1002,7 +1159,7 @@ pub async fn suggest_tags_batch(
             },
             "chatgpt" => match crate::chatgpt_auth::access_token(&app_handle).await {
                 Ok(token) => {
-                    call_chatgpt(&token, &settings.chatgpt_model, &prompt, &images).await
+                    call_chatgpt(&token, &settings.chatgpt_model, &prompt, &images, pdf.as_ref()).await
                 }
                 // Chưa sign in / session hết hạn — lỗi chung cho cả batch
                 Err(e) => return Err(e),

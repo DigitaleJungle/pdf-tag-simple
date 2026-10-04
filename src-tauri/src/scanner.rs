@@ -483,3 +483,20 @@ pub fn render_all_pages_jpeg(
         .map(|index| render_page_jpeg(app_handle, pdf_path, index, target_width))
         .collect()
 }
+
+// AI tagging ("Filename + PDF text"): text layer của mọi trang, có đánh dấu số trang.
+// Nhanh hơn render ảnh rất nhiều (~0.1s cho 20 trang). PDF scan không có text → chuỗi rỗng.
+pub fn extract_pdf_text(app_handle: &tauri::AppHandle, pdf_path: &str) -> Result<String, String> {
+    let pdfium = get_pdfium(app_handle)?;
+    let mut cache = doc_cache().lock().map_err(|e| e.to_string())?;
+    let doc = cache.get_or_load(pdfium, pdf_path)?;
+    let mut out = String::new();
+    for (index, page) in doc.pages().iter().enumerate() {
+        let text = page.text().map(|t| t.all()).unwrap_or_default();
+        let text = text.trim();
+        if !text.is_empty() {
+            out.push_str(&format!("[Page {}]\n{}\n\n", index + 1, text));
+        }
+    }
+    Ok(out)
+}

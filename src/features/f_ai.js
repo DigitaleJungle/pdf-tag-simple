@@ -368,17 +368,27 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     body.appendChild(makeLabel("Input Mode"));
     const inputModeSelect = makeSelect([
         { value: "filename", label: "Filename only (fast, works with any model)" },
+        { value: "text", label: "Filename + PDF text (fast, works with any model)" },
         { value: "thumbnail", label: "Filename + cover image (needs vision model)" },
-        { value: "pages", label: "Filename + all pages (slowest, needs vision model)" },
+        { value: "pages", label: "Filename + all pages as images (slowest, needs vision model)" },
+        { value: "pdf", label: "Filename + PDF file (not with Ollama)" },
     ], settings.input_mode);
     body.appendChild(inputModeSelect);
-    const pagesHint = document.createElement("div");
-    pagesHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    pagesHint.innerText = "Every page is rendered as a small image (512 px wide) and sent with the filename — not the PDF file itself. Cost and time grow with the number of pages, and books over roughly 300 pages are too large to send.";
-    body.appendChild(pagesHint);
-    function updatePagesHint() { pagesHint.style.display = inputModeSelect.value === "pages" ? "" : "none"; }
-    inputModeSelect.addEventListener("change", updatePagesHint);
-    updatePagesHint();
+    const INPUT_MODE_HINTS = {
+        text: "Sends the text of every page (up to about 100,000 characters). Much faster and cheaper than images. Scanned PDFs without a text layer can't be read this way.",
+        pages: "Every page is rendered as a small image (512 px wide) and sent with the filename — not the PDF file itself. Cost and time grow with the number of pages, and books over roughly 300 pages are too large to send.",
+        pdf: "Sends the original PDF file (up to 30 MB). The AI reads both its text and its page images, so it works for scanned PDFs too. Works with OpenAI, Gemini and ChatGPT, not with Ollama.",
+    };
+    const inputModeHint = document.createElement("div");
+    inputModeHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    body.appendChild(inputModeHint);
+    function updateInputModeHint() {
+        const hint = INPUT_MODE_HINTS[inputModeSelect.value] || "";
+        inputModeHint.innerText = hint;
+        inputModeHint.style.display = hint ? "" : "none";
+    }
+    inputModeSelect.addEventListener("change", updateInputModeHint);
+    updateInputModeHint();
 
     // Tag language
     body.appendChild(makeDivider());
@@ -653,7 +663,9 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         }
     }
 
-    const BATCH_SIZE = 20;
+    // Số sách xử lý song song. Gemini free tier phải tuần tự (backend giãn request ~6.5s),
+    // Ollama chạy trên máy user nên song song chỉ tranh nhau tài nguyên.
+    const CONCURRENCY = (settings.provider === "gemini_free" || settings.provider === "ollama") ? 1 : 4;
 
     // Scope options
     const selectedArr = selectedBooks ? [...selectedBooks] : [];
@@ -810,9 +822,12 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         }
         if (settings.input_mode === "thumbnail") {
             costText += " ⚠️ Thumbnail mode costs more";
-        } else if (settings.input_mode === "pages") {
+        } else if (settings.input_mode === "pages" || settings.input_mode === "pdf") {
             // Số trang chưa biết trước — mỗi trang tốn gần bằng 1 ảnh bìa
             costText = `~${eligible.length} books · cost depends on page count (each page costs about as much as one cover image)`;
+        } else if (settings.input_mode === "text") {
+            // Độ dài text chưa biết trước — tối đa ~25k tokens mỗi sách
+            costText = `~${eligible.length} books · cost depends on how much text each PDF has (at most ~25,000 tokens per book)`;
         }
 
         costBox.innerHTML = `<b>Estimate:</b> ${costText}<br>
@@ -903,29 +918,39 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         let processed = 0;
         let runError = null;
 
-        for (let i = 0; i < eligible.length; i += BATCH_SIZE) {
-            const batch = eligible.slice(i, i + BATCH_SIZE);
-            statusText.innerText = `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(total / BATCH_SIZE)}... (${processed}/${total})`;
+        // Gửi từng sách một (để progress bar cập nhật sau mỗi sách), CONCURRENCY sách cùng lúc.
+        // Lỗi dừng cả lượt chạy (key sai, hết quota ngày, chưa sign in...) → các worker dừng nhận sách mới.
+        let nextIndex = 0;
+        const showProgress = () => {
+            statusText.innerText = `Processing... ${processed}/${total} books` +
+                (CONCURRENCY > 1 ? ` (${CONCURRENCY} at a time)` : "");
+            progressFill.style.width = `${Math.round((processed / total) * 100)}%`;
+        };
+        showProgress();
 
-            try {
-                const suggestions = await api.suggestTagsBatch(batch.map(b => ({
-                    path: b.path,
-                    file_name: b.file_name,
-                    thumbnail_path: b.thumbnail_path || "",
-                    current_tags: b.tags || [],
-                })), runOptions);
+        async function worker() {
+            while (!runError && nextIndex < eligible.length) {
+                const b = eligible[nextIndex++];
+                try {
+                    const suggestions = await api.suggestTagsBatch([{
+                        path: b.path,
+                        file_name: b.file_name,
+                        thumbnail_path: b.thumbnail_path || "",
+                        current_tags: b.tags || [],
+                    }], runOptions);
 
-                allSuggestions.push(...suggestions);
-                for (const s of suggestions) {
-                    resultsWrap.appendChild(renderSuggestionRow(s, allBooks.find(b => b.path === s.path)));
+                    allSuggestions.push(...suggestions);
+                    for (const s of suggestions) {
+                        resultsWrap.appendChild(renderSuggestionRow(s, allBooks.find(x => x.path === s.path)));
+                    }
+                } catch (err) {
+                    runError = runError || err;
                 }
-                processed += batch.length;
-                progressFill.style.width = `${Math.round((processed / total) * 100)}%`;
-            } catch (err) {
-                runError = err;
-                break;
+                processed++;
+                showProgress();
             }
         }
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, eligible.length) }, worker));
 
         const doneCount = allSuggestions.filter(s => !s.error).length;
         if (runError) {
