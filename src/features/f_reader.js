@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { saveEntry, toggleBookmark, isBookmarked } from "./f_reading_history.js";
+import { openSummaryPanel, closeSummaryPanel, isSummaryPanelOpen, summaryBookPath, mountSummaryPanel } from "./f_summary.js";
 
 // =============================================
 // f_reader.js — In-app PDF reader
@@ -229,9 +230,49 @@ export async function openReader(book, initialPage = null) {
         updateBookmarkBtn();
     });
 
+    // Summary panel bên phải reader — trạng thái mở/đóng nhớ qua localStorage,
+    // giữ nguyên khi chuyển sách (swipe/prev/next) và khi đóng/mở lại reader
+    const summaryBtn = toolbarIconButton(
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>'
+    );
+    function readerSummaryOpen() {
+        try { return localStorage.getItem("readerSummaryOpen") === "true"; } catch { return false; }
+    }
+    function setReaderSummaryOpen(open) {
+        try { localStorage.setItem("readerSummaryOpen", String(open)); } catch { /* ignore */ }
+        updateSummaryBtn();
+    }
+    function updateSummaryBtn() {
+        const open = readerSummaryOpen();
+        summaryBtn.style.opacity = open ? "1" : "0.55";
+        summaryBtn.title = open ? "Hide summary" : "Show summary";
+    }
+    const readerSummaryActions = {
+        onEdit: (b) => window.__APP_ACTIONS__?.editBook?.(b, (updated) => {
+            if (updated && currentBook?.path === updated.path) {
+                currentBook = updated;
+                title.innerText = updated.file_name;
+            }
+        }),
+        onAi: (b) => window.__APP_ACTIONS__?.runAiOnBooks?.([b.path]),
+        onUserClose: () => setReaderSummaryOpen(false),
+        // Trong reader: ‹ › chuyển cả reader (giống nút prev/next trên toolbar)
+        onNavigate: (_b, dir) => goToAdjacent(dir),
+    };
+    function syncReaderSummary() {
+        if (readerSummaryOpen() && currentBook) openSummaryPanel(currentBook, readerSummaryActions);
+        else closeSummaryPanel();
+    }
+    summaryBtn.addEventListener("click", () => {
+        setReaderSummaryOpen(!readerSummaryOpen());
+        syncReaderSummary();
+    });
+    updateSummaryBtn();
+
     rightGroup.appendChild(bookmarkBtn);
     rightGroup.appendChild(pageIndicator);
     rightGroup.appendChild(zoomWrap);
+    rightGroup.appendChild(summaryBtn);
     rightGroup.appendChild(menuBtn);
 
     toolbar.appendChild(leftGroup);
@@ -246,9 +287,19 @@ export async function openReader(book, initialPage = null) {
         touch-action: pan-y;
     `;
 
+    // Thân reader: trang PDF + summary panel (mượn từ grid) cạnh nhau
+    const readerBody = document.createElement("div");
+    readerBody.style.cssText = "flex:1; min-height:0; display:flex;";
+    readerBody.appendChild(scrollArea);
+
     overlay.appendChild(toolbar);
-    overlay.appendChild(scrollArea);
+    overlay.appendChild(readerBody);
     document.body.appendChild(overlay);
+
+    // Nhớ panel ở grid (Summary view) để mở lại sau khi đóng reader
+    const gridSummaryPath = isSummaryPanelOpen() ? summaryBookPath() : null;
+    closeSummaryPanel();
+    mountSummaryPanel(readerBody);
 
     // --- Session state (persists across prev/next navigation within this session) ---
     let currentBook = null;
@@ -712,7 +763,11 @@ export async function openReader(book, initialPage = null) {
         document.removeEventListener("keydown", onKeydown, true);
         document.removeEventListener("mouseup", onMouseUp, true);
         window.removeEventListener("beforeunload", saveLastRead);
+        // Trả summary panel về grid; mở lại sách đã hiện ở đó trước khi đọc (nếu có)
+        closeSummaryPanel();
+        mountSummaryPanel(null);
         overlay.remove();
+        if (gridSummaryPath) window.__APP_ACTIONS__?.openSummary?.({ path: gridSummaryPath });
         if (currentSession === session) currentSession = null;
         window.__APP_ACTIONS__?.onReaderClosed?.();
     }
@@ -750,6 +805,7 @@ export async function openReader(book, initialPage = null) {
         title.title = newBook.path;
         updateNavButtons();
         updateBookmarkBtn();
+        syncReaderSummary();
 
         scrollArea.innerHTML = "";
         scrollArea.scrollTop = 0;

@@ -11,7 +11,8 @@ import { api } from "./api.js";
 //   onToggleSelect — callback khi single click (toggle select)
 //   clickBehavior  — "select" (mặc định, click chọn/double-click mở "Edit name & Tags") |
 //                     "open-default" (click mở bằng app mặc định của hệ thống) |
-//                     "open-reader" (click mở ngay trong reader, double-click vô hiệu)
+//                     "open-reader" (click mở ngay trong reader, double-click vô hiệu) |
+//                     "summary" (click mở summary panel bên phải, double-click mở reader)
 //   onEditBook     — callback khi double click trong Manage mode ("select") — mở
 //                    modal "Edit name & Tags" thay vì mở reader
 //   detailed       — true = card ngang, lớn hơn (setting "Show short description"):
@@ -292,6 +293,10 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
             window.__TAURI__.opener.openPath(book.path);
             return;
         }
+        if (clickBehavior === "summary") {
+            window.__APP_ACTIONS__?.openSummary?.(book);
+            return;
+        }
         clearTimeout(clickTimer);
         if (e.detail > 1) return; // 2nd+ click of a multi-click — dblclick handles it
         pendingToggleApplied = false;
@@ -305,6 +310,11 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     });
 
     card.addEventListener("dblclick", (e) => {
+        // Summary view: click mở panel, double-click mở reader
+        if (clickBehavior === "summary") {
+            onOpen(book);
+            return;
+        }
         if (clickBehavior !== "select") return; // single click already handles opening
         clearTimeout(clickTimer);
         if (pendingToggleApplied) {

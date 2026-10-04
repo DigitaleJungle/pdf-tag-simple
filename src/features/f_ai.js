@@ -15,6 +15,37 @@ import { api } from "./api.js";
 // thumbnail: ~500 tokens/book (image low detail ~85 tokens + text)
 const TOKENS_PER_BOOK_TEXT = 50;
 const TOKENS_PER_BOOK_IMAGE = 500;
+
+// Input modes — dùng chung cho AI Settings (mặc định) và modal AI auto (từng lần chạy)
+const INPUT_MODE_OPTIONS = [
+    { value: "filename", label: "Filename only" },
+    { value: "text", label: "Filename + PDF text" },
+    { value: "thumbnail", label: "Filename + cover image" },
+    { value: "pages", label: "Filename + all pages (images)" },
+    { value: "pdf", label: "Filename + PDF file" },
+];
+const INPUT_MODE_HINTS = {
+    text: "Text of every page (up to ~100,000 characters). Fast and cheap; can't read scanned PDFs.",
+    pages: "Every page as a small image. Slow; cost grows with page count (max ~300 pages).",
+    pdf: "The original PDF (max 30 MB). Also reads scanned PDFs. Not with Ollama.",
+    filename: "Only the filename. Fastest and cheapest.",
+    thumbnail: "The cover image. Needs a vision model.",
+};
+
+// Select input mode + dòng hint bên dưới, tự cập nhật khi đổi
+function makeInputModePicker(selected) {
+    const select = makeSelect(INPUT_MODE_OPTIONS, selected);
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size:11px; color:var(--text-secondary);";
+    function updateHint() {
+        const text = INPUT_MODE_HINTS[select.value] || "";
+        hint.innerText = text;
+        hint.style.display = text ? "" : "none";
+    }
+    select.addEventListener("change", updateHint);
+    updateHint();
+    return { select, hint };
+}
 const COST_PER_1K_INPUT = 0.00015; // gpt-4o-mini input price
 
 function estimateCost(bookCount, inputMode) {
@@ -144,14 +175,14 @@ export async function renderAiSettingsSection(container, ctx = {}) {
 
     const geminiHint = document.createElement("div");
     geminiHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    geminiHint.innerText = "Create an API key at aistudio.google.com. Whether usage is free or paid depends on billing on the key's Google Cloud project, not on this setting.";
+    geminiHint.innerText = "Get a key at aistudio.google.com. Free or paid depends on billing for the key's Google Cloud project.";
     geminiSection.appendChild(geminiHint);
 
     const geminiFreeNote = document.createElement("div");
     geminiFreeNote.style.cssText = "font-size:11px; line-height:1.45; color:var(--text-secondary); background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:8px 10px;";
     geminiFreeNote.innerHTML = `
-        <div><b>Rate limit:</b> the free tier allows about 10 requests per minute and roughly 1,000 per day, depending on the model. PDF Tag Simple waits about 6 seconds between books to stay under it, so 100 books take around 10 minutes. Pro models aren't available on the free tier.</div>
-        <div style="margin-top:6px;"><b>Privacy:</b> on the free tier Google may use what you send — book filenames, and cover images if enabled — to improve its products, and human reviewers may read it. Don't use it for files whose names contain sensitive or personal information.</div>`;
+        <div><b>Rate limit:</b> ~10 requests/minute and ~1,000/day. The app waits ~6 s between books (100 books ≈ 10 min). No Pro models.</div>
+        <div style="margin-top:6px;"><b>Privacy:</b> Google may use what you send (filenames, images, text) to improve its products, and people may review it. Avoid sensitive files.</div>`;
     geminiSection.appendChild(geminiFreeNote);
 
     let geminiModels = null; // null = not loaded yet
@@ -227,7 +258,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
 
     const chatgptHint = document.createElement("div");
     chatgptHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    chatgptHint.innerText = "Signs in through your browser. Tagging counts toward your ChatGPT plan's usage limits — no API key needed.";
+    chatgptHint.innerText = "Signs in via your browser and uses your ChatGPT plan's limits. No API key needed.";
     chatgptSection.appendChild(chatgptHint);
 
     let chatgptState = "signed-out"; // "signed-out" | "waiting" | "signed-in"
@@ -340,7 +371,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     ollamaSection.appendChild(ollamaModelInput);
     const ollamaHint = document.createElement("div");
     ollamaHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    ollamaHint.innerText = "For thumbnail mode, use a vision model: llava, llama3.2-vision";
+    ollamaHint.innerText = "For image methods, use a vision model (llava, llama3.2-vision).";
     ollamaSection.appendChild(ollamaHint);
 
     body.appendChild(openaiSection);
@@ -365,30 +396,10 @@ export async function renderAiSettingsSection(container, ctx = {}) {
 
     // Input mode
     body.appendChild(makeDivider());
-    body.appendChild(makeLabel("Input Mode"));
-    const inputModeSelect = makeSelect([
-        { value: "filename", label: "Filename only (fast, works with any model)" },
-        { value: "text", label: "Filename + PDF text (fast, works with any model)" },
-        { value: "thumbnail", label: "Filename + cover image (needs vision model)" },
-        { value: "pages", label: "Filename + all pages as images (slowest, needs vision model)" },
-        { value: "pdf", label: "Filename + PDF file (not with Ollama)" },
-    ], settings.input_mode);
+    body.appendChild(makeLabel("AI Method (default)"));
+    const { select: inputModeSelect, hint: inputModeHint } = makeInputModePicker(settings.input_mode);
     body.appendChild(inputModeSelect);
-    const INPUT_MODE_HINTS = {
-        text: "Sends the text of every page (up to about 100,000 characters). Much faster and cheaper than images. Scanned PDFs without a text layer can't be read this way.",
-        pages: "Every page is rendered as a small image (512 px wide) and sent with the filename — not the PDF file itself. Cost and time grow with the number of pages, and books over roughly 300 pages are too large to send.",
-        pdf: "Sends the original PDF file (up to 30 MB). The AI reads both its text and its page images, so it works for scanned PDFs too. Works with OpenAI, Gemini and ChatGPT, not with Ollama.",
-    };
-    const inputModeHint = document.createElement("div");
-    inputModeHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
     body.appendChild(inputModeHint);
-    function updateInputModeHint() {
-        const hint = INPUT_MODE_HINTS[inputModeSelect.value] || "";
-        inputModeHint.innerText = hint;
-        inputModeHint.style.display = hint ? "" : "none";
-    }
-    inputModeSelect.addEventListener("change", updateInputModeHint);
-    updateInputModeHint();
 
     // Tag language
     body.appendChild(makeDivider());
@@ -415,7 +426,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     body.appendChild(skipInput);
     const skipHint = document.createElement("div");
     skipHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    skipHint.innerText = "Books already having this many tags will be skipped.";
+    skipHint.innerText = "Books with this many tags are skipped for tagging.";
     body.appendChild(skipHint);
 
     // Max tags per book
@@ -428,7 +439,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     body.appendChild(maxTagsInput);
     const maxTagsHint = document.createElement("div");
     maxTagsHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    maxTagsHint.innerText = "The AI suggests at most this many tags for each book.";
+    maxTagsHint.innerText = "Maximum tags the AI suggests per book.";
     body.appendChild(maxTagsHint);
 
     // Tag vocabulary
@@ -436,7 +447,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     body.appendChild(makeLabel("Tag Vocabulary (optional)"));
     const vocabHint = document.createElement("div");
     vocabHint.style.cssText = "font-size:11px; color:var(--text-secondary); margin-bottom:6px;";
-    vocabHint.innerText = "Preferred tags. AI will map to these when they fit (e.g. 'sci-fi' instead of 'science fiction'). Leave empty for free tagging.";
+    vocabHint.innerText = "Preferred tags the AI uses when they fit. Leave empty for free tagging.";
     body.appendChild(vocabHint);
 
     let vocabTags = [...(settings.tag_vocabulary || [])];
@@ -475,7 +486,7 @@ export async function renderAiSettingsSection(container, ctx = {}) {
     body.appendChild(makeLabel("Saved prompts (optional)"));
     const promptsHint = document.createElement("div");
     promptsHint.style.cssText = "font-size:11px; color:var(--text-secondary); margin-bottom:6px;";
-    promptsHint.innerText = "Extra instructions you can pick in the AI auto window, e.g. \"Write descriptions for a teenage audience\". Click Save Settings to keep changes.";
+    promptsHint.innerText = "Instructions you can pick in the AI auto window. Click Save Settings to keep changes.";
     body.appendChild(promptsHint);
 
     let savedPrompts = (settings.saved_prompts || []).map(p => ({ name: p.name, text: p.text }));
@@ -675,7 +686,8 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 
     const overlay = document.createElement("div");
     overlay.className = "ai-autotag-overlay";
-    overlay.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:3000; padding:20px;";
+    // Trên reader (z-index 6000), vì AI auto cũng mở được từ summary panel trong reader
+    overlay.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:6500; padding:20px;";
 
     const modal = document.createElement("div");
     modal.style.cssText = "width:min(700px,100%); background:var(--panel); color:var(--text); border-radius:14px; box-shadow:var(--shadow-md); overflow:hidden; font-family:inherit; max-height:90vh; display:flex; flex-direction:column; border:1px solid var(--border);";
@@ -684,16 +696,41 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     const header = document.createElement("div");
     header.style.cssText = "padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;";
     header.innerHTML = `<div style="font-size:18px;font-weight:700;color:var(--text);">AI Auto-Tag</div>`;
-    header.appendChild(makeCloseBtn(() => overlay.remove()));
+    // Handler thật được gán sau (closeModal) — cần refresh grid nếu đã lưu kết quả
+    const headerCloseBtn = makeCloseBtn(() => overlay.remove());
+    header.appendChild(headerCloseBtn);
 
     // Body
     const body = document.createElement("div");
     body.style.cssText = "padding:18px; display:flex; flex-direction:column; gap:14px; overflow-y:auto; flex:1;";
 
     // --- Scope selection ---
+    // Tất cả lựa chọn nằm trong optionsWrap — thu gọn thành 1 dòng tóm tắt khi bấm Start
+    const optionsWrap = document.createElement("div");
+    optionsWrap.style.cssText = "display:flex; flex-direction:column; gap:12px;";
+    body.appendChild(optionsWrap);
+    const topRow = document.createElement("div");
+    topRow.style.cssText = "display:flex; flex-direction:column; gap:12px;";
+    optionsWrap.appendChild(topRow);
+
+    // "Advanced": các lựa chọn ít dùng + giải thích, đóng mặc định (nhớ trạng thái)
+    const moreDetails = document.createElement("details");
+    moreDetails.style.cssText = "border:1px solid var(--border); border-radius:8px; padding:8px 12px; background:var(--panel-soft);";
+    try { moreDetails.open = localStorage.getItem("aiMoreOptionsOpen") === "true"; } catch { /* ignore */ }
+    moreDetails.addEventListener("toggle", () => {
+        try { localStorage.setItem("aiMoreOptionsOpen", String(moreDetails.open)); } catch { /* ignore */ }
+    });
+    const moreSummary = document.createElement("summary");
+    moreSummary.style.cssText = "cursor:pointer; font-size:13px; font-weight:600; color:var(--text); user-select:none;";
+    moreSummary.innerText = "Advanced";
+    moreDetails.appendChild(moreSummary);
+    const moreBody = document.createElement("div");
+    moreBody.style.cssText = "display:flex; flex-direction:column; gap:10px; margin-top:10px;";
+    moreDetails.appendChild(moreBody);
+
     const scopeBlock = document.createElement("div");
-    scopeBlock.style.cssText = "display:flex; flex-direction:column; gap:8px;";
-    scopeBlock.appendChild(makeLabel("Which books?"));
+    scopeBlock.style.cssText = "display:flex; flex-direction:column; gap:6px; min-width:0;";
+    scopeBlock.appendChild(makeLabel("Books"));
 
     const scopeOptions = [
         { value: "all", label: `All books (${allBooks.length})` },
@@ -707,7 +744,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 
     const scopeSelect = makeSelect(scopeOptions, selectedArr.length > 0 ? "selected" : "all");
     scopeBlock.appendChild(scopeSelect);
-    body.appendChild(scopeBlock);
+    topRow.appendChild(scopeBlock);
 
     // --- What to fill in ---
     // Lựa chọn được nhớ lại giữa các lần mở (chỉ là tiện ích, lỗi storage thì dùng mặc định)
@@ -718,8 +755,8 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     } catch { /* ignore */ }
 
     const fillBlock = document.createElement("div");
-    fillBlock.style.cssText = "display:flex; flex-direction:column; gap:8px;";
-    fillBlock.appendChild(makeLabel("What should the AI fill in?"));
+    fillBlock.style.cssText = "display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;";
+    fillBlock.appendChild(makeLabel("Fill in"));
     const fillRow = document.createElement("div");
     fillRow.style.cssText = "display:flex; flex-wrap:wrap; gap:16px;";
     const fillCheckboxes = {};
@@ -746,19 +783,47 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     fillBlock.appendChild(fillRow);
     const fillHint = document.createElement("div");
     fillHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    fillHint.innerText = "Descriptions replace the current ones when you apply; you can edit them first. They're most accurate with \"Filename + all pages\".";
-    fillBlock.appendChild(fillHint);
-    body.appendChild(fillBlock);
+    fillHint.innerText = "Descriptions replace the current ones (editable before applying). Best with PDF text, pages or PDF file.";
+
+    // Lưu ngay từng kết quả khi về, không cần review/Apply all (nhớ lại giữa các lần mở)
+    let applyImmediately = false;
+    try { applyImmediately = localStorage.getItem("aiApplyImmediately") === "true"; } catch { /* ignore */ }
+    const immediateLabel = document.createElement("label");
+    immediateLabel.style.cssText = "display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text); cursor:pointer; margin-top:2px;";
+    const immediateCheckbox = document.createElement("input");
+    immediateCheckbox.type = "checkbox";
+    immediateCheckbox.checked = applyImmediately;
+    immediateCheckbox.addEventListener("change", () => {
+        applyImmediately = immediateCheckbox.checked;
+        try { localStorage.setItem("aiApplyImmediately", String(applyImmediately)); } catch { /* ignore */ }
+    });
+    immediateLabel.appendChild(immediateCheckbox);
+    immediateLabel.appendChild(document.createTextNode("Apply results immediately"));
+    optionsWrap.appendChild(fillBlock);
+    optionsWrap.appendChild(immediateLabel);
+    optionsWrap.appendChild(moreDetails);
+
+    // --- Input cho lần chạy này --- (mặc định theo AI Settings, không lưu lại)
+    const inputBlock = document.createElement("div");
+    inputBlock.style.cssText = "display:flex; flex-direction:column; gap:6px; min-width:0;";
+    inputBlock.appendChild(makeLabel("AI Method"));
+    const { select: runInputSelect, hint: runInputHint } = makeInputModePicker(settings.input_mode || "filename");
+    // Giải thích dạng tooltip trên select; cũng hiện ở cuối "Advanced"
+    const updateInputTooltip = () => { runInputSelect.title = INPUT_MODE_HINTS[runInputSelect.value] || ""; };
+    runInputSelect.addEventListener("change", () => { updateInputTooltip(); updateCostEstimate(); updateMoreSummary(); });
+    updateInputTooltip();
+    inputBlock.appendChild(runInputSelect);
+    moreBody.appendChild(inputBlock);
 
     // --- Extra instructions ---
     // Chọn prompt soạn sẵn rồi sửa cho lần chạy này (không lưu lại), tự gõ, hoặc để trống
     const promptBlock = document.createElement("div");
-    promptBlock.style.cssText = "display:flex; flex-direction:column; gap:8px;";
+    promptBlock.style.cssText = "display:flex; flex-direction:column; gap:6px;";
     promptBlock.appendChild(makeLabel("Extra instructions (optional)"));
     const savedPrompts = settings.saved_prompts || [];
     const promptSelect = makeSelect([
-        { value: "", label: savedPrompts.length > 0 ? "Start from: blank" : "Start from: blank (no saved prompts yet)" },
-        ...savedPrompts.map((p, i) => ({ value: String(i), label: `Start from: ${p.name}` })),
+        { value: "", label: savedPrompts.length > 0 ? "- select -" : "- no saved prompts yet -" },
+        ...savedPrompts.map((p, i) => ({ value: String(i), label: p.name })),
     ], "");
     const promptText = document.createElement("textarea");
     promptText.rows = 3;
@@ -771,14 +836,59 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     promptSelect.addEventListener("change", () => {
         const picked = savedPrompts[parseInt(promptSelect.value)];
         promptText.value = picked ? picked.text : "";
+        updateMoreSummary();
     });
+    promptText.addEventListener("input", () => updateMoreSummary());
+
+    // Nhớ prompt dùng lần trước (lưu khi bấm Start). Lưu theo tên prompt, không theo index,
+    // vì danh sách saved prompts có thể đã đổi. Lỗi storage → bắt đầu trống như bình thường.
+    try {
+        const last = JSON.parse(localStorage.getItem("aiLastPrompt") || "null");
+        if (last && typeof last.text === "string") {
+            const index = savedPrompts.findIndex(p => p.name === last.name);
+            if (index !== -1) promptSelect.value = String(index);
+            promptText.value = last.text;
+        }
+    } catch { /* ignore */ }
+    function rememberPrompt() {
+        const picked = savedPrompts[parseInt(promptSelect.value)];
+        try {
+            localStorage.setItem("aiLastPrompt", JSON.stringify({ name: picked ? picked.name : "", text: promptText.value }));
+        } catch { /* ignore */ }
+    }
+
     const promptHint = document.createElement("div");
     promptHint.style.cssText = "font-size:11px; color:var(--text-secondary);";
-    promptHint.innerText = "Changes here only apply to this run. Manage saved prompts in Settings > AI Settings.";
+    promptHint.innerText = "Only for this run; your last instructions are remembered. Manage saved prompts in AI Settings.";
     promptBlock.appendChild(promptSelect);
     promptBlock.appendChild(promptText);
     promptBlock.appendChild(promptHint);
-    body.appendChild(promptBlock);
+    moreBody.appendChild(promptBlock);
+
+    // Giải thích, gom ở cuối "Advanced"
+    const helpBlock = document.createElement("div");
+    helpBlock.style.cssText = "display:flex; flex-direction:column; gap:4px; border-top:1px solid var(--border); padding-top:8px;";
+    helpBlock.appendChild(fillHint);
+    helpBlock.appendChild(runInputHint);
+    moreBody.appendChild(helpBlock);
+
+    // Tiêu đề "Advanced" cho biết đang chọn gì, để không có gì bị ẩn mà không biết
+    function updateMoreSummary() {
+        // Input luôn được nhắc, vì nó nằm trong panel đang đóng
+        const active = [`method: ${(INPUT_MODE_OPTIONS.find(o => o.value === runInputSelect.value)?.label || runInputSelect.value).replace(/ \(.*\)$/, "")}`];
+        const instructions = promptText.value.trim();
+        if (instructions) {
+            const picked = savedPrompts[parseInt(promptSelect.value)];
+            active.push(`instructions: ${picked && picked.text.trim() === instructions ? picked.name : "custom"}`);
+        }
+        moreSummary.innerText = active.length ? `Advanced · ${active.join(" · ")}` : "Advanced";
+    }
+    updateMoreSummary();
+
+    // Tóm tắt 1 dòng thay cho optionsWrap khi đang chạy / review
+    const runSummary = document.createElement("div");
+    runSummary.style.cssText = "display:none; font-size:12px; color:var(--text-secondary); background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:8px 12px;";
+    body.appendChild(runSummary);
 
     // Sách cần xử lý: thiếu tags (khi chọn Tags) hoặc có chọn description
     function needsWork(b) {
@@ -789,7 +899,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     // --- Cost estimate ---
     // Ẩn hoàn toàn khi provider = ollama (local = free, không cần estimate)
     const costBox = document.createElement("div");
-    costBox.style.cssText = "background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:12px; color:var(--text-secondary);";
+    costBox.style.cssText = "font-size:12px; color:var(--text-secondary);";
 
     function updateCostEstimate() {
         // Ẩn cost box khi dùng Ollama (free), ChatGPT (tính vào plan) hoặc Gemini trả phí (giá tùy model)
@@ -810,28 +920,28 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         // Gemini free tier: no cost, but time (~6.5 s per book) and a daily limit
         if (settings.provider === "gemini_free") {
             const minutes = Math.ceil((eligible.length * 6.5) / 60);
-            costBox.innerHTML = `<b>Gemini free tier:</b> ~${eligible.length} books · about ${minutes} min (one book every ~6 seconds${settings.input_mode === "pages" ? ", plus page rendering; long books can also hit the per-minute token limit" : ""})` +
-                (eligible.length > 1000 ? "<br>⚠️ More than the ~1,000 requests per day the free tier usually allows — the run will stop when the daily limit is reached." : "");
+            costBox.innerHTML = `<b>Gemini free tier:</b> ~${eligible.length} books · about ${minutes} min (~6 s per book${runInputSelect.value === "pages" ? ", plus page rendering" : ""})` +
+                (eligible.length > 1000 ? "<br>⚠️ Over the ~1,000 requests/day free limit — the run stops when it's reached." : "");
             return;
         }
-        const { totalTokens, cost } = estimateCost(eligible.length, settings.input_mode);
+        const { totalTokens, cost } = estimateCost(eligible.length, runInputSelect.value);
 
         let costText = `~${eligible.length} books · ~${totalTokens.toLocaleString()} tokens · Est. cost: $${cost}`;
         if (fillOptions.short_description || fillOptions.description) {
-            costText += " (descriptions add output tokens on top)";
+            costText += " + descriptions";
         }
-        if (settings.input_mode === "thumbnail") {
+        if (runInputSelect.value === "thumbnail") {
             costText += " ⚠️ Thumbnail mode costs more";
-        } else if (settings.input_mode === "pages" || settings.input_mode === "pdf") {
+        } else if (runInputSelect.value === "pages" || runInputSelect.value === "pdf") {
             // Số trang chưa biết trước — mỗi trang tốn gần bằng 1 ảnh bìa
-            costText = `~${eligible.length} books · cost depends on page count (each page costs about as much as one cover image)`;
-        } else if (settings.input_mode === "text") {
+            costText = `~${eligible.length} books · cost depends on page count`;
+        } else if (runInputSelect.value === "text") {
             // Độ dài text chưa biết trước — tối đa ~25k tokens mỗi sách
-            costText = `~${eligible.length} books · cost depends on how much text each PDF has (at most ~25,000 tokens per book)`;
+            costText = `~${eligible.length} books · cost depends on text length (max ~25k tokens/book)`;
         }
 
-        costBox.innerHTML = `<b>Estimate:</b> ${costText}<br>
-            <span style="color:var(--text-secondary);">Provider: ${settings.provider} · Input: ${settings.input_mode} · Language: ${settings.tag_language || "auto"} · Skip ≥${settings.skip_if_tags_gte} tags</span>`;
+        costBox.innerHTML = `<b>Estimate:</b> ${costText}`;
+        costBox.title = `Provider: ${settings.provider} · Input: ${runInputSelect.value} · Language: ${settings.tag_language || "auto"} · Skip ≥${settings.skip_if_tags_gte} tags`;
     }
 
     scopeSelect.addEventListener("change", updateCostEstimate);
@@ -884,6 +994,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     document.body.appendChild(overlay);
 
     let allSuggestions = [];
+    let appliedCount = 0;
 
     // Start
     startBtn.onclick = async () => {
@@ -897,6 +1008,10 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
             statusText.innerText = "Choose at least one thing for the AI to fill in.";
             return;
         }
+        if (settings.provider === "ollama" && runInputSelect.value === "pdf") {
+            statusText.innerText = "Ollama can't read PDF files. Choose \"Filename + PDF text\" instead.";
+            return;
+        }
         const eligible = booksToProcess.filter(needsWork);
 
         if (eligible.length === 0) {
@@ -907,9 +1022,25 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         startBtn.disabled = true;
         scopeSelect.disabled = true;
         Object.values(fillCheckboxes).forEach(cb => { cb.disabled = true; });
+        immediateCheckbox.disabled = true;
+        const saveAsTheyArrive = applyImmediately;
         promptSelect.disabled = true;
         promptText.disabled = true;
-        const runOptions = { ...fillOptions, extra_prompt: promptText.value.trim() };
+        runInputSelect.disabled = true;
+        const runOptions = { ...fillOptions, extra_prompt: promptText.value.trim(), input_mode: runInputSelect.value };
+
+        // Thu gọn lựa chọn thành 1 dòng để kết quả có chỗ
+        const filled = [["tags", "Tags"], ["short_description", "Short description"], ["description", "Long description"]]
+            .filter(([key]) => runOptions[key]).map(([, label]) => label).join(", ");
+        const inputLabel = (INPUT_MODE_OPTIONS.find(o => o.value === runOptions.input_mode)?.label || runOptions.input_mode).replace(/ \(.*\)$/, "");
+        const summaryParts = [`${eligible.length} book${eligible.length === 1 ? "" : "s"}`, filled, inputLabel];
+        if (runOptions.extra_prompt) summaryParts.push("with extra instructions");
+        if (saveAsTheyArrive) summaryParts.push("saving immediately");
+        runSummary.innerText = summaryParts.join(" · ");
+        runSummary.title = runOptions.extra_prompt ? `Extra instructions: ${runOptions.extra_prompt}` : "";
+        optionsWrap.style.display = "none";
+        runSummary.style.display = "";
+        rememberPrompt();
         progressWrap.style.display = "";
         resultsWrap.innerHTML = "";
         allSuggestions = [];
@@ -922,8 +1053,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         // Lỗi dừng cả lượt chạy (key sai, hết quota ngày, chưa sign in...) → các worker dừng nhận sách mới.
         let nextIndex = 0;
         const showProgress = () => {
-            statusText.innerText = `Processing... ${processed}/${total} books` +
-                (CONCURRENCY > 1 ? ` (${CONCURRENCY} at a time)` : "");
+            statusText.innerText = `Processing... ${processed}/${total} books`;
             progressFill.style.width = `${Math.round((processed / total) * 100)}%`;
         };
         showProgress();
@@ -942,6 +1072,11 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
                     allSuggestions.push(...suggestions);
                     for (const s of suggestions) {
                         resultsWrap.appendChild(renderSuggestionRow(s, allBooks.find(x => x.path === s.path)));
+                    }
+                    if (saveAsTheyArrive && suggestions.some(s => !s.error)) {
+                        // Lấy danh sách mới nhất để merge với tags hiện có
+                        const books = await api.getBooks();
+                        for (const s of suggestions) await applySuggestion(s, books);
                     }
                 } catch (err) {
                     runError = runError || err;
@@ -962,9 +1097,63 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         }
         progressFill.style.width = "100%";
         startBtn.style.display = "none";
-        applyBtn.style.display = "";
-        footerLeft.innerText = "Review the results above, then click Apply.";
+        if (saveAsTheyArrive) {
+            // Đã lưu từng sách khi kết quả về — không cần Apply all
+            cancelBtn.innerText = "Close";
+            footerLeft.innerText = `${appliedCount} book${appliedCount === 1 ? "" : "s"} saved as results arrived.`;
+        } else {
+            applyBtn.style.display = "";
+            footerLeft.innerText = "Review the results above, then click Apply.";
+        }
     };
+
+    // Lưu kết quả của 1 sách (dùng cho "Apply all" và cho "Apply immediately").
+    // books = danh sách mới nhất từ backend, để merge với tags hiện có.
+    async function applySuggestion(s, books) {
+        if (s.error || s.applied) return false;
+
+        // Đọc giá trị (có thể đã sửa) từ preview row
+        const row = resultsWrap.querySelector(`[data-path="${CSS.escape(s.path)}"]`);
+        let finalTags = s.suggested_tags;
+        let shortText = s.short_description || "";
+        let longText = s.description || "";
+        if (row) {
+            finalTags = [...row.querySelectorAll(".tag-chip-text")].map(el => el.innerText).filter(Boolean);
+            const shortEl = row.querySelector(".ai-short-description");
+            const longEl = row.querySelector(".ai-description");
+            if (shortEl) shortText = shortEl.value;
+            if (longEl) longText = longEl.value;
+        }
+        shortText = shortText.trim();
+        longText = longText.trim();
+        // Chỉ lưu description khi được tạo ở lần chạy này và không bị xóa trống
+        const newShort = s.short_description != null && shortText ? shortText : undefined;
+        const newLong = s.description != null && longText ? longText : undefined;
+        if (finalTags.length === 0 && newShort === undefined && newLong === undefined) return false;
+
+        try {
+            const book = books.find(b => b.path === s.path);
+            const existing = book?.tags || [];
+            const merged = [...existing];
+            for (const t of finalTags) {
+                if (!merged.some(x => x.toLowerCase() === t.toLowerCase())) merged.push(t);
+            }
+            await api.updateBook(s.path, book?.file_name || s.file_name, merged, newLong, newShort);
+            s.applied = true;
+            appliedCount++;
+            if (row) markRowSaved(row);
+            return true;
+        } catch (err) {
+            console.error("Apply error:", s.path, err);
+            return false;
+        }
+    }
+
+    // Đóng modal; nếu đã lưu gì thì refresh grid để thấy tags/description mới
+    function closeModal() {
+        overlay.remove();
+        if (appliedCount > 0 && typeof onApplied === "function") onApplied();
+    }
 
     // Apply
     applyBtn.onclick = async () => {
@@ -972,49 +1161,26 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         applyBtn.innerText = "Applying...";
 
         const books = await api.getBooks();
-        let applied = 0;
-
         for (const s of allSuggestions) {
-            if (s.error) continue;
-
-            // Đọc giá trị (có thể đã sửa) từ preview row
-            const row = resultsWrap.querySelector(`[data-path="${CSS.escape(s.path)}"]`);
-            let finalTags = s.suggested_tags;
-            let shortText = s.short_description || "";
-            let longText = s.description || "";
-            if (row) {
-                finalTags = [...row.querySelectorAll(".tag-chip-text")].map(el => el.innerText).filter(Boolean);
-                const shortEl = row.querySelector(".ai-short-description");
-                const longEl = row.querySelector(".ai-description");
-                if (shortEl) shortText = shortEl.value;
-                if (longEl) longText = longEl.value;
-            }
-            shortText = shortText.trim();
-            longText = longText.trim();
-            // Chỉ lưu description khi được tạo ở lần chạy này và không bị xóa trống
-            const newShort = s.short_description != null && shortText ? shortText : undefined;
-            const newLong = s.description != null && longText ? longText : undefined;
-            if (finalTags.length === 0 && newShort === undefined && newLong === undefined) continue;
-
-            try {
-                const book = books.find(b => b.path === s.path);
-                const existing = book?.tags || [];
-                const merged = [...existing];
-                for (const t of finalTags) {
-                    if (!merged.some(x => x.toLowerCase() === t.toLowerCase())) merged.push(t);
-                }
-                await api.updateBook(s.path, book?.file_name || s.file_name, merged, newLong, newShort);
-                applied++;
-            } catch (err) {
-                console.error("Apply error:", s.path, err);
-            }
+            await applySuggestion(s, books);
         }
-
-        overlay.remove();
-        if (typeof onApplied === "function") onApplied();
+        closeModal();
     };
 
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    cancelBtn.onclick = closeModal;
+    headerCloseBtn.onclick = closeModal;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+}
+
+// Đánh dấu row đã lưu: badge "Saved" + khóa các ô sửa
+function markRowSaved(row) {
+    if (row.querySelector(".ai-saved-badge")) return;
+    const badge = document.createElement("div");
+    badge.className = "ai-saved-badge";
+    badge.style.cssText = "font-size:11px; font-weight:600; color:var(--success);";
+    badge.innerText = "✓ Saved";
+    row.insertBefore(badge, row.children[1] || null);
+    row.querySelectorAll("input, textarea, button").forEach(el => { el.disabled = true; });
 }
 
 // =============================================

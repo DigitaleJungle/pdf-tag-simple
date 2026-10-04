@@ -104,6 +104,7 @@ const CLICK_BEHAVIOR_OPTIONS = [
     { value: "select", label: "Manage", hint: "Click selects the book; double-click opens it in the reader." },
     { value: "open-default", label: "Read mode + default application", hint: "Click opens the PDF in your system's default PDF viewer." },
     { value: "open-reader", label: "Read mode + in-app reader", hint: "Click opens the PDF directly in the built-in reader." },
+    { value: "summary", label: "Summary view", hint: "Click shows the book's details in a panel on the right; double-click opens it in the reader." },
 ];
 
 async function renderGeneralSection(container, ctx) {

@@ -235,6 +235,12 @@ fn get_pdf_page_count(app_handle: tauri::AppHandle, book_path: String) -> Result
     scanner::get_pdf_page_count(&app_handle, &book_path)
 }
 
+// Dung lượng file trên disk (bytes) — dùng cho summary panel
+#[tauri::command]
+fn get_file_size(file_path: String) -> Result<u64, String> {
+    std::fs::metadata(&file_path).map(|m| m.len()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn render_pdf_page(
     app_handle: tauri::AppHandle,
@@ -331,6 +337,7 @@ fn main() {
             delete_tag,
             find_duplicates,
             get_pdf_page_count,
+            get_file_size,
             render_pdf_page,
             get_page_cache_settings,
             save_page_cache_settings,

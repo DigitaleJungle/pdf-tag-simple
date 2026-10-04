@@ -154,6 +154,9 @@ pub struct AiFillOptions {
     // Hướng dẫn thêm cho lần chạy này (từ prompt soạn sẵn hoặc tự gõ) — rỗng = không gửi
     #[serde(default)]
     pub extra_prompt: String,
+    // Input mode cho lần chạy này (chọn trong modal) — rỗng = dùng input_mode trong AI Settings
+    #[serde(default)]
+    pub input_mode: String,
 }
 
 fn default_true() -> bool { true }
@@ -917,7 +920,7 @@ fn chatgpt_error_message(code: Option<&str>, fallback: String) -> String {
             "This ChatGPT account isn't eligible to use its plan in other apps.".to_string()
         }
         Some("subscription_sharing_unsupported_capability") => {
-            "This request isn't supported with ChatGPT sign-in. If Input Mode includes the cover image, switch to filename only.".to_string()
+            "This request isn't supported with ChatGPT sign-in. If the AI Method sends images, switch to \"Filename + PDF text\".".to_string()
         }
         Some("subscription_sharing_invalid_user") => {
             "Your ChatGPT session is no longer valid. Sign in again under Settings > AI Settings.".to_string()
@@ -1086,8 +1089,9 @@ pub async fn suggest_tags_batch(
     if settings.provider == "chatgpt" && settings.chatgpt_model.is_empty() {
         return Err("No ChatGPT model selected. Please choose one in AI Settings.".to_string());
     }
-    if settings.provider == "ollama" && settings.input_mode == "pdf" {
-        return Err("Ollama can't read PDF files. Choose \"Filename + PDF text\" as Input Mode in AI Settings.".to_string());
+    let input_mode = if options.input_mode.is_empty() { settings.input_mode.as_str() } else { options.input_mode.as_str() };
+    if settings.provider == "ollama" && input_mode == "pdf" {
+        return Err("Ollama can't read PDF files. Choose \"Filename + PDF text\" as the AI Method.".to_string());
     }
 
     let mut results = Vec::new();
@@ -1106,7 +1110,7 @@ pub async fn suggest_tags_batch(
         let max_output_tokens = if want.any_text() { 1500 } else { 100 };
 
         // Nội dung gửi kèm theo input_mode: không có / ảnh bìa / mọi trang / PDF gốc / text
-        let (images, pdf, source_note) = match prepare_content(&app_handle, &settings.input_mode, &book).await {
+        let (images, pdf, source_note) = match prepare_content(&app_handle, input_mode, &book).await {
             Ok(content) => content,
             Err(e) => {
                 results.push(AiTagSuggestion::failed(book.path, book.file_name, e));

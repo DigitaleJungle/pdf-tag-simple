@@ -9,6 +9,7 @@ import { openDuplicates } from "./features/f_duplicates.js";
 import { openSettings } from "./features/f_settings.js";
 import { openAutoBackupPrompt } from "./features/f_backup_prompt.js";
 import { openReader } from "./features/f_reader.js";
+import { openSummaryPanel, refreshSummaryPanel, closeSummaryPanel } from "./features/f_summary.js";
 import { readList, toggleBookmark, writeCurrentFilters } from "./features/f_reading_history.js";
 
 // ==========================================
@@ -24,7 +25,7 @@ let state = {
     currentSort: "name-asc", // Kiểu sắp xếp
     viewMode: "library",     // "library" | "trash"
     selectedBooks: new Set(), // Set<path> — sách đang được multi-select
-    clickBehavior: localStorage.getItem("clickBehavior") || "select", // "select" | "open-default" | "open-reader"
+    clickBehavior: localStorage.getItem("clickBehavior") || "select", // "select" | "open-default" | "open-reader" | "summary"
     showShortDescription: localStorage.getItem("showShortDescription") === "true" // card ngang có short description
 };
 window.__DEBUG_STATE__ = state;
@@ -47,6 +48,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const btnAiAutoTag        = document.querySelector("#btn-ai-autotag");
     const btnFindDuplicates   = document.querySelector("#btn-find-duplicates");
     const btnThemeToggle      = document.querySelector("#btn-theme-toggle");
+    const btnToggleSidebar    = document.querySelector("#btn-toggle-sidebar");
+    const btnCardSizeToggle   = document.querySelector("#btn-card-size-toggle");
 
     // Selection + trash buttons
     const btnTrashView        = document.querySelector("#btn-trash-view");
@@ -178,6 +181,26 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Gọi từ f_reader.js khi reader đóng — refresh label/visibility của nút
         // "Continue reading" (nó có thể đã lưu 1 vị trí mới trong lúc đọc).
         onReaderClosed: () => updateJumpLastButton(),
+        // Gọi từ ui_grid_card.js khi Behaviour = "Summary view"
+        openSummary: (book) => {
+            openSummaryPanel(state.books.find(b => b.path === book.path) || book, {
+                onRead: (b) => openReader(b),
+                onEdit: (b) => openEditModal(b, () => refreshUi()),
+                onStarChanged: () => updateGrid(),
+                onAi: (b) => window.__APP_ACTIONS__.runAiOnBooks([b.path]),
+                onNavigate: (b, dir) => {
+                    const next = window.__APP_ACTIONS__.getAdjacentBook(b.path, dir);
+                    if (next) window.__APP_ACTIONS__.openSummary(next);
+                },
+            });
+        },
+        // "Activate AI" trong AI Settings — summary panel / context menu dùng để hiện nút AI
+        isAiEnabled: () => state.aiEnabled !== false,
+        // Mở cửa sổ AI auto với đúng những sách này (scope mặc định = "Selected books")
+        runAiOnBooks: (paths) => {
+            const visibleBooks = state.books.filter(b => !b.hidden);
+            openAiAutoTag(visibleBooks, new Set(paths), state.currentFilterPath, () => refreshUi());
+        },
     };
 
     // ==========================================
@@ -326,18 +349,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (btnSettings) {
         btnSettings.addEventListener("click", () => openSettings({
             clickBehavior: state.clickBehavior,
-            onClickBehaviorChange: (value) => {
-                state.clickBehavior = value;
-                localStorage.setItem("clickBehavior", value);
-                updateSelectionUI();
-                updateGrid();
-            },
+            onClickBehaviorChange: (value) => setClickBehavior(value),
             showShortDescription: state.showShortDescription,
-            onShowShortDescriptionChange: (value) => {
-                state.showShortDescription = value;
-                localStorage.setItem("showShortDescription", String(value));
-                updateGrid();
-            },
+            onShowShortDescriptionChange: (value) => setLargeCards(value),
             onAddPath: addPath,
             onRemovePath: removePath,
             getFolders: () => api.getFolders(),
@@ -482,6 +496,55 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
+    // ==========================================
+    // BEHAVIOUR — dùng chung cho Settings và nút Summary view trên toolbar
+    // ==========================================
+    function setClickBehavior(value) {
+        state.clickBehavior = value;
+        localStorage.setItem("clickBehavior", value);
+        if (value !== "summary") closeSummaryPanel();
+        updateSelectionUI();
+        updateGrid();
+    }
+
+    // ==========================================
+    // CARD NHỎ / CARD LỚN — dùng chung cho Settings ("Show short description") và nút trên toolbar
+    // ==========================================
+    const ICON_LARGE_CARDS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/></svg>';
+    const ICON_SMALL_CARDS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
+    function setLargeCards(value) {
+        state.showShortDescription = value;
+        localStorage.setItem("showShortDescription", String(value));
+        updateCardSizeToggle();
+        updateGrid();
+    }
+    // Icon cho biết bấm vào sẽ chuyển sang kiểu nào
+    function updateCardSizeToggle() {
+        if (!btnCardSizeToggle) return;
+        const large = state.showShortDescription;
+        btnCardSizeToggle.innerHTML = large ? ICON_SMALL_CARDS : ICON_LARGE_CARDS;
+        btnCardSizeToggle.title = large ? "Switch to small cards" : "Switch to large cards (with short description)";
+    }
+    if (btnCardSizeToggle) {
+        btnCardSizeToggle.addEventListener("click", () => setLargeCards(!state.showShortDescription));
+    }
+    updateCardSizeToggle();
+
+    // ==========================================
+    // SIDEBAR THU GỌN — nhớ trạng thái qua localStorage
+    // ==========================================
+    const appShell = document.querySelector(".app-shell");
+    function setSidebarCollapsed(collapsed) {
+        appShell?.classList.toggle("sidebar-collapsed", collapsed);
+        if (btnToggleSidebar) btnToggleSidebar.title = collapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)";
+        localStorage.setItem("sidebarCollapsed", String(collapsed));
+    }
+    function toggleSidebar() {
+        setSidebarCollapsed(!appShell?.classList.contains("sidebar-collapsed"));
+    }
+    setSidebarCollapsed(localStorage.getItem("sidebarCollapsed") === "true");
+    if (btnToggleSidebar) btnToggleSidebar.addEventListener("click", toggleSidebar);
+
     if (btnFindDuplicates) {
         btnFindDuplicates.addEventListener("click", () => {
             openDuplicates(() => refreshUi());
@@ -504,8 +567,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Khi ẩn đi, "Find Duplicates" bỏ full-width để tự trôi lên chiếm chỗ của nó
     // trong lưới 2 cột — tránh để lại 1 ô trống nhìn lệch.
     function applyAiEnabledVisibility(enabled) {
+        state.aiEnabled = enabled;
         if (btnAiAutoTag) btnAiAutoTag.style.display = enabled ? "" : "none";
         if (btnFindDuplicates) btnFindDuplicates.classList.toggle("full-width", enabled);
+        // Nút "AI auto" trong summary panel hiện/ẩn theo trạng thái này
+        refreshSummaryPanel(state.books);
     }
     api.getAiSettings()
         .then(s => applyAiEnabledVisibility(s.enabled !== false))
@@ -582,6 +648,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         updateTrashButton();
         updateSelectionUI();
         updateGrid();
+        refreshSummaryPanel(state.books);
     }
 
     function updateGrid() {
@@ -833,6 +900,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         if ((e.ctrlKey || e.metaKey) && e.key === "a") {
             e.preventDefault();
             selectAllVisible();
+        }
+
+        // Ctrl/Cmd + B — thu gọn / mở sidebar
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+            e.preventDefault();
+            toggleSidebar();
         }
 
         // Ctrl/Cmd + F — focus ô tìm kiếm

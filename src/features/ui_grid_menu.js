@@ -82,6 +82,14 @@ export function showCardContextMenu(x, y, book, onUpdateSuccess, viewMode = "lib
         }
   ];
 
+  // AI auto cho sách này (hoặc cả selection khi bulk) — chỉ khi AI được bật, không trong thùng rác
+  if (viewMode !== "trash" && window.__APP_ACTIONS__?.isAiEnabled?.() && window.__APP_ACTIONS__?.runAiOnBooks) {
+    items.push({
+      label: isBulk ? `AI auto (${selectedBooks.size} books)` : "AI auto",
+      action: () => window.__APP_ACTIONS__.runAiOnBooks(isBulk ? [...selectedBooks] : [book.path])
+    });
+  }
+
   items.forEach(({ label, action }) => {
     const item = document.createElement("div");
     item.innerText = label;

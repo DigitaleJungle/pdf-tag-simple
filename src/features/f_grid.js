@@ -187,6 +187,17 @@ function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnl
             if (!a.starred && b.starred) return 1;
             return (a.date_added || 0) - (b.date_added || 0);
         });
+    } else if (sort === "missing-short" || sort === "missing-long") {
+        // Ngoại lệ của quy tắc starred: sách thiếu description lên đầu trước, rồi mới tới starred,
+        // để sách có starred mà đã có description không chen lên trên những sách cần điền
+        const field = sort === "missing-short" ? "short_description" : "description";
+        const isEmpty = (book) => !(book[field] || "").trim();
+        result = [...result].sort((a, b) => {
+            if (isEmpty(a) !== isEmpty(b)) return isEmpty(a) ? -1 : 1;
+            if (a.starred && !b.starred) return -1;
+            if (!a.starred && b.starred) return 1;
+            return a.file_name.toLowerCase().localeCompare(b.file_name.toLowerCase());
+        });
     } else {
         // name-asc (mặc định)
         result = [...result].sort((a, b) => {

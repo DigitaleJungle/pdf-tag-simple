@@ -76,6 +76,8 @@ export const api = {
     // ===== IN-APP READER =====
     // Số trang của 1 PDF
     getPdfPageCount: (path) => invoke("get_pdf_page_count", { bookPath: path }),
+    // Dung lượng file trên disk (bytes)
+    getFileSize: (path) => invoke("get_file_size", { filePath: path }),
     // Render 1 trang ra JPEG bytes ở độ rộng target_width (px)
     renderPdfPage: (path, pageIndex, targetWidth) =>
         invoke("render_pdf_page", { bookPath: path, pageIndex, targetWidth }),
