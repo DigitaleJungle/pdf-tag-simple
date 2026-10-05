@@ -1,7 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::Manager;
 
 // =============================================
 // AI SERVICE — Auto-tag sách bằng AI
@@ -14,9 +13,9 @@ use tauri::Manager;
 //   Ollama  — local, filename only hoặc + thumbnail (vision model)
 //
 // Flow:
-//   1. Frontend gọi ai_suggest_tags với danh sách books
+//   1. Frontend gọi suggest_tags cho từng sách (vài sách song song)
 //   2. Backend build prompt, gọi API
-//   3. Trả về Vec<AiTagSuggestion> để frontend preview
+//   3. Trả về AiTagSuggestion để frontend preview
 //   4. User confirm → frontend gọi api.updateBook để apply
 // =============================================
 
@@ -136,12 +135,6 @@ pub struct AiTagSuggestion {
     pub error: Option<String>,  // Nếu có lỗi khi tag sách này
 }
 
-impl AiTagSuggestion {
-    fn failed(path: String, file_name: String, error: String) -> Self {
-        Self { path, file_name, suggested_tags: Vec::new(), short_description: None, description: None, error: Some(error) }
-    }
-}
-
 // Những gì user muốn AI điền (checkbox trong modal AI)
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiFillOptions {
@@ -178,10 +171,12 @@ impl Wanted {
 // ===== SETTINGS I/O =====
 
 fn settings_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("ai_settings.json"))
+    Ok(crate::db::app_dir(app_handle)?.join("ai_settings.json"))
 }
 
+// Không dùng db::read_json: JSON hỏng phải báo lỗi, không được âm thầm về mặc định
+// (Save Settings lần sau sẽ ghi đè mất API key)
+#[tauri::command]
 pub fn get_ai_settings(app_handle: tauri::AppHandle) -> Result<AiSettings, String> {
     let path = settings_path(&app_handle)?;
     if !path.exists() {
@@ -191,16 +186,12 @@ pub fn get_ai_settings(app_handle: tauri::AppHandle) -> Result<AiSettings, Strin
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
 pub fn save_ai_settings(
     app_handle: tauri::AppHandle,
     settings: AiSettings,
 ) -> Result<String, String> {
-    let path = settings_path(&app_handle)?;
-    std::fs::write(
-        &path,
-        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+    crate::db::write_json(&settings_path(&app_handle)?, &settings)?;
     Ok("Settings saved".to_string())
 }
 
@@ -343,15 +334,7 @@ fn build_prompt(
 
 // Đọc thumbnail và encode base64 để gửi lên API
 fn thumbnail_to_base64(thumbnail_path: &str) -> Option<String> {
-    if thumbnail_path.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(thumbnail_path);
-    if !path.exists() {
-        return None;
-    }
-    let bytes = std::fs::read(&path).ok()?;
-    Some(general_purpose::STANDARD.encode(&bytes))
+    std::fs::read(thumbnail_path).ok().map(|bytes| general_purpose::STANDARD.encode(bytes))
 }
 
 // ===== PAGE IMAGES ("Filename + all pages") =====
@@ -722,7 +705,8 @@ async fn probe_gemini_model(client: reqwest::Client, api_key: String, id: String
 // Model dùng được để tag: Gemini, hỗ trợ generateContent, không phải model ảnh/audio/embedding.
 // Models list vẫn liệt kê model đã ngừng hoặc không có trong gói, nên thử từng model
 // bằng 1 request nhỏ (chạy song song) và chỉ giữ model trả lời được.
-pub async fn list_gemini_models(api_key: &str) -> Result<Vec<GeminiModel>, String> {
+#[tauri::command]
+pub async fn gemini_list_models(api_key: String) -> Result<Vec<GeminiModel>, String> {
     if api_key.trim().is_empty() {
         return Err("Enter a Gemini API key first.".to_string());
     }
@@ -1060,15 +1044,16 @@ async fn call_ollama(
 }
 
 // ===== MAIN ENTRY POINT =====
-// Gọi từ main.rs → frontend
 
-// Suggest tags cho 1 batch sách
-// Trả về Vec<AiTagSuggestion> để frontend hiện preview
-pub async fn suggest_tags_batch(
+// Suggest tags / descriptions cho 1 sách — trả về AiTagSuggestion để frontend preview.
+// Lỗi của riêng sách này → Ok với .error; Err = lỗi chung (key sai, hết quota ngày,
+// chưa sign in...) → frontend dừng cả lượt chạy.
+#[tauri::command]
+pub async fn suggest_tags(
     app_handle: tauri::AppHandle,
-    books: Vec<BookToTag>,
+    book: BookToTag,
     options: AiFillOptions,
-) -> Result<Vec<AiTagSuggestion>, String> {
+) -> Result<AiTagSuggestion, String> {
     let settings = get_ai_settings(app_handle.clone())?;
 
     if !options.tags && !options.short_description && !options.description {
@@ -1094,112 +1079,87 @@ pub async fn suggest_tags_batch(
         return Err("Ollama can't read PDF files. Choose \"Filename + PDF text\" as the AI Method.".to_string());
     }
 
-    let mut results = Vec::new();
-
-    for book in books {
-        // Tags: bỏ qua nếu sách đã có đủ tags. Description: luôn tạo nếu được chọn.
-        let want = Wanted {
-            tags: options.tags && book.current_tags.len() < settings.skip_if_tags_gte as usize,
-            short_description: options.short_description,
-            description: options.description,
-        };
-        if !want.tags && !want.any_text() {
-            continue;
-        }
-        // Đủ chỗ cho description dài; chỉ tags thì giữ giới hạn nhỏ như trước
-        let max_output_tokens = if want.any_text() { 1500 } else { 100 };
-
-        // Nội dung gửi kèm theo input_mode: không có / ảnh bìa / mọi trang / PDF gốc / text
-        let (images, pdf, source_note) = match prepare_content(&app_handle, input_mode, &book).await {
-            Ok(content) => content,
-            Err(e) => {
-                results.push(AiTagSuggestion::failed(book.path, book.file_name, e));
-                continue;
-            }
-        };
-
-        let prompt = build_prompt(
-            &book.file_name,
-            &settings.tag_vocabulary,
-            &settings.tag_language,
-            settings.max_tags,
-            &source_note,
-            want,
-            &options.extra_prompt,
-        );
-
-        let tag_result = match settings.provider.as_str() {
-            "openai" => {
-                call_openai(
-                    &settings.openai_api_key,
-                    &settings.openai_model,
-                    &prompt,
-                    &images,
-                    pdf.as_ref(),
-                    max_output_tokens,
-                )
-                .await
-            }
-            "gemini" | "gemini_free" => match call_gemini(
-                &settings.gemini_api_key,
-                &settings.gemini_model,
-                &prompt,
-                &images,
-                pdf.as_ref(),
-                settings.provider == "gemini_free",
-            )
-            .await
-            {
-                Ok(tags) => Ok(tags),
-                // Key sai / hết quota ngày: dừng batch, khỏi gọi tiếp cho các sách còn lại
-                Err((message, true)) => {
-                    if results.is_empty() {
-                        return Err(message);
-                    }
-                    results.push(AiTagSuggestion::failed(book.path, book.file_name, message));
-                    break;
-                }
-                Err((message, false)) => Err(message),
-            },
-            "chatgpt" => match crate::chatgpt_auth::access_token(&app_handle).await {
-                Ok(token) => {
-                    call_chatgpt(&token, &settings.chatgpt_model, &prompt, &images, pdf.as_ref()).await
-                }
-                // Chưa sign in / session hết hạn — lỗi chung cho cả batch
-                Err(e) => return Err(e),
-            },
-            "ollama" => {
-                call_ollama(
-                    &settings.ollama_host,
-                    &settings.ollama_model,
-                    &prompt,
-                    &images,
-                    max_output_tokens,
-                )
-                .await
-            }
-            _ => Err(format!("Unknown provider: {}", settings.provider)),
-        };
-
-        match tag_result.and_then(|text| parse_ai_response(&text, want)) {
-            Ok((tags, short_description, description)) => results.push(AiTagSuggestion {
-                path: book.path,
-                file_name: book.file_name,
-                suggested_tags: limit_tags(tags, settings.max_tags),
-                short_description,
-                description,
-                error: None,
-            }),
-            Err(e) => results.push(AiTagSuggestion::failed(book.path, book.file_name, e)),
-        }
+    // Tags: bỏ qua nếu sách đã có đủ tags. Description: luôn tạo nếu được chọn.
+    let want = Wanted {
+        tags: options.tags && book.current_tags.len() < settings.skip_if_tags_gte as usize,
+        short_description: options.short_description,
+        description: options.description,
+    };
+    let empty = AiTagSuggestion {
+        path: book.path.clone(),
+        file_name: book.file_name.clone(),
+        suggested_tags: Vec::new(),
+        short_description: None,
+        description: None,
+        error: None,
+    };
+    if !want.tags && !want.any_text() {
+        return Ok(empty);
     }
+    let failed = |e: String| AiTagSuggestion { error: Some(e), ..empty.clone() };
+    // Đủ chỗ cho description dài; chỉ tags thì giữ giới hạn nhỏ như trước
+    let max_output_tokens = if want.any_text() { 1500 } else { 100 };
 
-    Ok(results)
+    // Nội dung gửi kèm theo input_mode: không có / ảnh bìa / mọi trang / PDF gốc / text
+    let (images, pdf, source_note) = match prepare_content(&app_handle, input_mode, &book).await {
+        Ok(content) => content,
+        Err(e) => return Ok(failed(e)),
+    };
+
+    let prompt = build_prompt(
+        &book.file_name,
+        &settings.tag_vocabulary,
+        &settings.tag_language,
+        settings.max_tags,
+        &source_note,
+        want,
+        &options.extra_prompt,
+    );
+
+    let answer = match settings.provider.as_str() {
+        "openai" => {
+            call_openai(&settings.openai_api_key, &settings.openai_model, &prompt, &images, pdf.as_ref(), max_output_tokens).await
+        }
+        "gemini" | "gemini_free" => match call_gemini(
+            &settings.gemini_api_key,
+            &settings.gemini_model,
+            &prompt,
+            &images,
+            pdf.as_ref(),
+            settings.provider == "gemini_free",
+        )
+        .await
+        {
+            Ok(text) => Ok(text),
+            // Key sai / hết quota ngày: dừng cả lượt chạy
+            Err((message, true)) => return Err(message),
+            Err((message, false)) => Err(message),
+        },
+        // Chưa sign in / session hết hạn — lỗi chung cho cả lượt chạy
+        "chatgpt" => {
+            let token = crate::chatgpt_auth::access_token(&app_handle).await?;
+            call_chatgpt(&token, &settings.chatgpt_model, &prompt, &images, pdf.as_ref()).await
+        }
+        "ollama" => {
+            call_ollama(&settings.ollama_host, &settings.ollama_model, &prompt, &images, max_output_tokens).await
+        }
+        _ => Err(format!("Unknown provider: {}", settings.provider)),
+    };
+
+    Ok(match answer.and_then(|text| parse_ai_response(&text, want)) {
+        Ok((tags, short_description, description)) => AiTagSuggestion {
+            suggested_tags: limit_tags(tags, settings.max_tags),
+            short_description,
+            description,
+            ..empty.clone()
+        },
+        Err(e) => failed(e),
+    })
 }
 
 // Kiểm tra Ollama có đang chạy không
-pub async fn check_ollama(host: &str) -> bool {
-    let client = reqwest::Client::new();
+#[tauri::command]
+pub async fn check_ollama(host: String) -> bool {
     let url = format!("{}/api/tags", host.trim_end_matches('/'));
-    client.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false)
+    reqwest::Client::new().get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false)
 }

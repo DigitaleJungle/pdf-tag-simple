@@ -1773,6 +1773,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2988,14 +2994,13 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "pdf-tag"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.17",
  "image",
  "jsonwebtoken",
  "pdfium-render",
- "rayon",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3007,7 +3012,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "url",
- "uuid",
  "walkdir",
  "webview2-com",
  "windows",
@@ -4406,6 +4410,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "http-range",
  "jni",
  "libc",
  "log",

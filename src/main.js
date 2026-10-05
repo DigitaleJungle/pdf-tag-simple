@@ -6,11 +6,12 @@ import { openEditModal } from "./features/ui_grid_menu.js";
 import { pickLibraryFolder } from "./features/f_addfolder.js";
 import { openAiAutoTag } from "./features/f_ai.js";
 import { openDuplicates } from "./features/f_duplicates.js";
-import { openSettings } from "./features/f_settings.js";
+import { openSettings, BEHAVIOURS } from "./features/f_settings.js";
 import { openAutoBackupPrompt } from "./features/f_backup_prompt.js";
 import { openReader } from "./features/f_reader.js";
 import { openSummaryPanel, refreshSummaryPanel, closeSummaryPanel } from "./features/f_summary.js";
 import { readList, toggleBookmark, writeCurrentFilters } from "./features/f_reading_history.js";
+import { el, showMenu, bindMenuButton, overlayOpen } from "./features/ui.js";
 
 // ==========================================
 // STATE
@@ -20,115 +21,78 @@ let state = {
     tags: [],                // Tags để render sidebar (chỉ của sách không hidden)
     selectedTags: [],        // Tags đang filter
     untaggedOnly: false,     // Lọc riêng sách chưa có tag nào — loại trừ với selectedTags
-    currentFilterPath: null, // Folder đang chọn trong sidebar
+    currentFilterPath: null, // Folder đang chọn trong sidebar (null = All Documents)
     currentSearch: "",       // Nội dung ô tìm kiếm
     currentSort: "name-asc", // Kiểu sắp xếp
     viewMode: "library",     // "library" | "trash"
     selectedBooks: new Set(), // Set<path> — sách đang được multi-select
-    clickBehavior: localStorage.getItem("clickBehavior") || "select", // "select" | "open-default" | "open-reader" | "summary"
+    clickBehavior: localStorage.getItem("clickBehavior") || "select", // xem BEHAVIOURS (f_settings.js)
     showShortDescription: localStorage.getItem("showShortDescription") === "true" // card ngang có short description
 };
-window.__DEBUG_STATE__ = state;
+
 // ==========================================
 // MAIN
 // ==========================================
 window.addEventListener("DOMContentLoaded", async () => {
 
-    // --- DOM Elements ---
-    const sidebarContainer    = document.querySelector("#sidebar-folders");
-    const assetGridContainer  = document.querySelector("#asset-grid");
-    const tagContainer        = document.querySelector("#tag-list-container");
-    const tagSearchInput      = document.querySelector("#tag-search-input");
-    const txtStatus           = document.querySelector("#txt-status");
-    const searchInput         = document.querySelector("#search-input");
-    const sortSelect          = document.querySelector("#sort-select");
+    // --- DOM Elements (tất cả có sẵn trong index.html) ---
+    const $ = (selector) => document.querySelector(selector);
+    const sidebarContainer    = $("#sidebar-folders");
+    const assetGridContainer  = $("#asset-grid");
+    const tagContainer        = $("#tag-list-container");
+    const tagSearchInput      = $("#tag-search-input");
+    const txtStatus           = $("#txt-status");
+    const searchInput         = $("#search-input");
+    const sortSelect          = $("#sort-select");
 
     // Toolbar buttons
-    const btnUpdateDB         = document.querySelector("#btn-update-db");
-    const btnAiAutoTag        = document.querySelector("#btn-ai-autotag");
-    const btnFindDuplicates   = document.querySelector("#btn-find-duplicates");
-    const btnThemeToggle      = document.querySelector("#btn-theme-toggle");
-    const btnToggleSidebar    = document.querySelector("#btn-toggle-sidebar");
-    const btnCardSizeToggle   = document.querySelector("#btn-card-size-toggle");
-    const btnBehaviour        = document.querySelector("#btn-behaviour");
+    const btnUpdateDB         = $("#btn-update-db");
+    const btnAiAutoTag        = $("#btn-ai-autotag");
+    const btnFindDuplicates   = $("#btn-find-duplicates");
+    const btnThemeToggle      = $("#btn-theme-toggle");
+    const btnToggleSidebar    = $("#btn-toggle-sidebar");
+    const btnCardSizeToggle   = $("#btn-card-size-toggle");
+    const btnBehaviour        = $("#btn-behaviour");
 
     // Selection + trash buttons
-    const btnTrashView        = document.querySelector("#btn-trash-view");
-    const txtTrashCount       = document.querySelector("#txt-trash-count");
-    const btnSettings         = document.querySelector("#btn-settings");
-    const txtSelectionCount   = document.querySelector("#txt-selection-count");
-    const btnBulkHide         = document.querySelector("#btn-bulk-hide");
-    const btnBulkRestore      = document.querySelector("#btn-bulk-restore");
-    const btnClearSelection   = document.querySelector("#btn-clear-selection");
-    const btnSelectAll        = document.querySelector("#btn-select-all");
-    const btnJumpLast         = document.querySelector("#btn-jump-last");
-    const btnJumpLastArrow    = document.querySelector("#btn-jump-last-arrow");
-
-    // Progress bar elements (trong #txt-status area)
-    // Tạo sẵn 1 lần, ẩn đi, chỉ hiện khi đang scan
-    const progressWrap = document.createElement("div");
-    progressWrap.style.cssText = "margin-top:6px; display:none;";
-
-    const progressBar = document.createElement("div");
-    progressBar.style.cssText = `
-        height: 6px;
-        background: var(--border);
-        border-radius: 3px;
-        overflow: hidden;
-        margin-bottom: 4px;
-    `;
-    const progressFill = document.createElement("div");
-    progressFill.style.cssText = `
-        height: 100%;
-        width: 0%;
-        background: var(--primary);
-        border-radius: 3px;
-        transition: width 0.2s ease;
-    `;
-
-    progressBar.appendChild(progressFill);
-
-    const progressText = document.createElement("div");
-    progressText.style.cssText = "font-size:11px; color:var(--text-secondary);";
-
-    progressWrap.appendChild(progressBar);
-    progressWrap.appendChild(progressText);
-
-    // Gắn progress bar vào ngay sau txtStatus
-    if (txtStatus && txtStatus.parentNode) {
-        txtStatus.parentNode.insertBefore(progressWrap, txtStatus.nextSibling);
-    }
+    const btnTrashView        = $("#btn-trash-view");
+    const txtTrashCount       = $("#txt-trash-count");
+    const btnSettings         = $("#btn-settings");
+    const txtSelectionCount   = $("#txt-selection-count");
+    const btnBulkHide         = $("#btn-bulk-hide");
+    const btnBulkRestore      = $("#btn-bulk-restore");
+    const btnClearSelection   = $("#btn-clear-selection");
+    const btnSelectAll        = $("#btn-select-all");
+    const btnJumpLast         = $("#btn-jump-last");
+    const btnJumpLastArrow    = $("#btn-jump-last-arrow");
 
     // ==========================================
     // PROGRESS BAR — lắng nghe event từ backend
     // Backend emit "scan_progress" sau mỗi thumbnail render
     // Payload: { current, total, file_name, done }
     // ==========================================
-    const { listen } = window.__TAURI__.event;
+    const scanProgress = $("#scan-progress");
+    const progressBar = scanProgress.querySelector("progress");
+    const progressText = scanProgress.querySelector(".hint");
 
-    listen("scan_progress", (event) => {
+    window.__TAURI__.event.listen("scan_progress", (event) => {
         const { current, total, file_name, done } = event.payload;
-
         if (done || total === 0) {
             // Hoàn thành — ẩn progress bar
-            progressFill.style.width = "100%";
+            progressBar.value = 1;
             setTimeout(() => {
-                progressWrap.style.display = "none";
-                progressFill.style.width = "0%";
+                scanProgress.hidden = true;
+                progressBar.value = 0;
             }, 800);
             return;
         }
-
-        // Hiện progress bar
-        progressWrap.style.display = "";
-
-        const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-        progressFill.style.width = pct + "%";
+        scanProgress.hidden = false;
+        progressBar.value = current / total;
         progressText.innerText = `Rendering thumbnails: ${current}/${total} — ${file_name}`;
     });
 
     // ==========================================
-    // APP ACTIONS — đăng ký để ui_grid_menu.js gọi
+    // APP ACTIONS — đăng ký để ui_grid_menu.js / f_reader.js / f_summary.js gọi
     // ==========================================
     window.__APP_ACTIONS__ = {
         hideBook: async (path) => {
@@ -140,15 +104,6 @@ window.addEventListener("DOMContentLoaded", async () => {
             await api.restoreBook(path);
             await refreshUi();
             setStatus("Book restored.", "green");
-        },
-        // Gọi từ ui_grid_card.js sau khi toggle star
-        // Chỉ re-sort grid, không reload toàn bộ (không gọi refreshUi)
-        // book.starred đã được update local trong card trước khi gọi đây
-        onStarToggled: (path, newState) => {
-            // Chỉ update local state — không re-render grid
-            // Starred books sẽ lên đầu lần sau vào folder hoặc refresh
-            const book = state.books.find(b => b.path === path);
-            if (book) book.starred = newState;
         },
         // Gọi từ f_reader.js — mở modal edit name & tags cho sách đang đọc.
         // onSaved (nếu có) nhận lại book đã update để reader tự cập nhật title.
@@ -167,15 +122,12 @@ window.addEventListener("DOMContentLoaded", async () => {
             const paths = getFilteredPaths();
             const idx = paths.indexOf(path);
             if (idx === -1) return null;
-            const newIdx = idx + direction;
-            if (newIdx < 0 || newIdx >= paths.length) return null;
-            return state.books.find(b => b.path === paths[newIdx]) || null;
+            return state.books.find(b => b.path === paths[idx + direction]) || null;
         },
         // Gọi từ f_reader.js — lấy sách đầu/cuối (edge: "first" | "last")
         // theo đúng thứ tự đang hiện trong grid, dùng cho nút "first/last" trong reader.
         getBoundaryBook: (edge) => {
             const paths = getFilteredPaths();
-            if (paths.length === 0) return null;
             const targetPath = edge === "first" ? paths[0] : paths[paths.length - 1];
             return state.books.find(b => b.path === targetPath) || null;
         },
@@ -198,11 +150,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         // "Activate AI" trong AI Settings — summary panel / context menu dùng để hiện nút AI
         isAiEnabled: () => state.aiEnabled !== false,
         // Mở cửa sổ AI auto với đúng những sách này (scope mặc định = "Selected books")
-        runAiOnBooks: (paths) => {
-            const visibleBooks = state.books.filter(b => !b.hidden);
-            openAiAutoTag(visibleBooks, new Set(paths), state.currentFilterPath, () => refreshUi());
-        },
+        runAiOnBooks: (paths) => openAi(new Set(paths)),
     };
+
+    function openAi(selected) {
+        openAiAutoTag(state.books.filter(b => !b.hidden), selected, state.currentFilterPath, () => refreshUi());
+    }
 
     // ==========================================
     // MULTI-SELECT
@@ -215,20 +168,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 
         if (shiftKey && getLastClickedIndex() >= 0) {
             // Shift+click → select tất cả cards trong range
-            const rangePaths = getShiftSelectRange(getLastClickedIndex(), currentIndex);
-            rangePaths.forEach(p => {
+            getShiftSelectRange(getLastClickedIndex(), currentIndex).forEach(p => {
                 state.selectedBooks.add(p);
                 updateCardSelectionVisual(p, true);
             });
         } else {
             // Click thường → toggle 1 card
-            if (state.selectedBooks.has(path)) {
-                state.selectedBooks.delete(path);
-                updateCardSelectionVisual(path, false);
-            } else {
-                state.selectedBooks.add(path);
-                updateCardSelectionVisual(path, true);
-            }
+            const selected = !state.selectedBooks.has(path);
+            if (selected) state.selectedBooks.add(path);
+            else state.selectedBooks.delete(path);
+            updateCardSelectionVisual(path, selected);
             setLastClickedIndex(currentIndex);
         }
 
@@ -252,66 +201,41 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Cập nhật text count + ẩn/hiện nút bulk action
     function updateSelectionUI() {
         const count = state.selectedBooks.size;
-        if (txtSelectionCount) txtSelectionCount.innerText = `${count} selected`;
+        txtSelectionCount.innerText = `${count} selected`;
 
         // Multi-select doesn't apply in a Read Mode (click opens the PDF instead
         // of selecting it), so hide the selection count and "Select all" there.
         const isReadMode = state.clickBehavior !== "select";
-        if (txtSelectionCount) txtSelectionCount.style.display = isReadMode ? "none" : "";
-        if (btnSelectAll)      btnSelectAll.style.display      = isReadMode ? "none" : "";
+        txtSelectionCount.style.display = isReadMode ? "none" : "";
+        btnSelectAll.style.display      = isReadMode ? "none" : "";
 
         const hasSelection = count > 0;
-        if (btnBulkHide)       btnBulkHide.style.display       = (hasSelection && state.viewMode === "library") ? "" : "none";
-        if (btnBulkRestore)    btnBulkRestore.style.display    = (hasSelection && state.viewMode === "trash")   ? "" : "none";
-        if (btnClearSelection) btnClearSelection.style.display = hasSelection ? "" : "none";
+        btnBulkHide.style.display       = (hasSelection && state.viewMode === "library") ? "" : "none";
+        btnBulkRestore.style.display    = (hasSelection && state.viewMode === "trash")   ? "" : "none";
+        btnClearSelection.style.display = hasSelection ? "" : "none";
     }
 
-    if (btnBulkHide) {
-        btnBulkHide.addEventListener("click", async () => {
-            if (state.selectedBooks.size === 0) return;
-            const paths = [...state.selectedBooks];
-            for (const path of paths) await api.hideBook(path);
-            state.selectedBooks.clear();
-            await refreshUi();
-            setStatus(`${paths.length} book(s) hidden.`, "gray");
-        });
+    async function bulkAction(apiCall, message, color) {
+        if (state.selectedBooks.size === 0) return;
+        const paths = [...state.selectedBooks];
+        for (const path of paths) await apiCall(path);
+        state.selectedBooks.clear();
+        await refreshUi();
+        setStatus(`${paths.length} book(s) ${message}.`, color);
     }
-
-    if (btnBulkRestore) {
-        btnBulkRestore.addEventListener("click", async () => {
-            if (state.selectedBooks.size === 0) return;
-            const paths = [...state.selectedBooks];
-            for (const path of paths) await api.restoreBook(path);
-            state.selectedBooks.clear();
-            await refreshUi();
-            setStatus(`${paths.length} book(s) restored.`, "green");
-        });
-    }
-
-    if (btnSelectAll)      btnSelectAll.addEventListener("click", selectAllVisible);
-    if (btnClearSelection) btnClearSelection.addEventListener("click", clearSelection);
+    btnBulkHide.addEventListener("click", () => bulkAction(api.hideBook, "hidden", "gray"));
+    btnBulkRestore.addEventListener("click", () => bulkAction(api.restoreBook, "restored", "green"));
+    btnSelectAll.addEventListener("click", selectAllVisible);
+    btnClearSelection.addEventListener("click", clearSelection);
 
     // ==========================================
     // THÙNG RÁC
     // ==========================================
     function updateTrashButton() {
         const count = state.books.filter(b => b.hidden).length;
-        if (txtTrashCount) txtTrashCount.innerText = count;
-
-        if (btnTrashView) {
-            if (count > 0) {
-                btnTrashView.disabled = false;
-                btnTrashView.style.cursor = "pointer";
-                btnTrashView.style.color = "";
-                btnTrashView.style.opacity = "1";
-            } else {
-                if (state.viewMode === "trash") switchToLibrary();
-                btnTrashView.disabled = true;
-                btnTrashView.style.cursor = "not-allowed";
-                btnTrashView.style.color = "var(--text-secondary)";
-                btnTrashView.style.opacity = "0.6";
-            }
-        }
+        txtTrashCount.innerText = count;
+        if (count === 0 && state.viewMode === "trash") switchToLibrary();
+        btnTrashView.disabled = count === 0; // styles.css: #btn-trash-view:disabled
     }
 
     function switchToTrash() {
@@ -319,11 +243,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         state.currentFilterPath = null;
         state.selectedTags = [];
         state.selectedBooks.clear();
-        if (btnTrashView) {
-            btnTrashView.style.background = "var(--danger-soft)";
-            btnTrashView.style.borderColor = "var(--danger)";
-            btnTrashView.style.color = "var(--danger)";
-        }
+        btnTrashView.style.background = "var(--danger-soft)";
+        btnTrashView.style.borderColor = "var(--danger)";
+        btnTrashView.style.color = "var(--danger)";
         updateSelectionUI();
         updateGrid();
     }
@@ -331,41 +253,31 @@ window.addEventListener("DOMContentLoaded", async () => {
     function switchToLibrary() {
         state.viewMode = "library";
         state.selectedBooks.clear();
-        if (btnTrashView) {
-            btnTrashView.style.background = "";
-            btnTrashView.style.borderColor = "";
-            btnTrashView.style.color = "";
-        }
+        btnTrashView.style.background = "";
+        btnTrashView.style.borderColor = "";
+        btnTrashView.style.color = "";
         updateSelectionUI();
         updateGrid();
     }
 
-    if (btnTrashView) {
-        btnTrashView.addEventListener("click", () => {
-            if (state.viewMode === "trash") switchToLibrary();
-            else switchToTrash();
-        });
-    }
+    btnTrashView.addEventListener("click", () => {
+        if (state.viewMode === "trash") switchToLibrary();
+        else switchToTrash();
+    });
 
-    if (btnSettings) {
-        btnSettings.addEventListener("click", () => openSettings({
-            clickBehavior: state.clickBehavior,
-            onClickBehaviorChange: (value) => setClickBehavior(value),
-            showShortDescription: state.showShortDescription,
-            onShowShortDescriptionChange: (value) => setLargeCards(value),
-            onAddPath: addPath,
-            onRemovePath: removePath,
-            getFolders: () => api.getFolders(),
-            onExport: exportBackup,
-            onImport: importBackup,
-            onAiEnabledChange: applyAiEnabledVisibility,
-            onUpdateDb: updateDatabase,
-            onFindDuplicates: () => openDuplicates(() => refreshUi()),
-            getPageCacheSettings: () => api.getPageCacheSettings(),
-            onPageCacheSettingsChange: (settings) => api.savePageCacheSettings(settings),
-            onPurgePageCache: () => api.clearPageCache(),
-        }));
-    }
+    btnSettings.addEventListener("click", () => openSettings({
+        clickBehavior: state.clickBehavior,
+        onClickBehaviorChange: (value) => setClickBehavior(value),
+        showShortDescription: state.showShortDescription,
+        onShowShortDescriptionChange: (value) => setLargeCards(value),
+        onAddPath: addPath,
+        onRemovePath: removePath,
+        onExport: exportBackup,
+        onImport: importBackup,
+        onAiEnabledChange: applyAiEnabledVisibility,
+        onUpdateDb: updateDatabase,
+        onFindDuplicates: () => openDuplicates(() => refreshUi()),
+    }));
 
     // ==========================================
     // SIDEBAR CALLBACKS
@@ -378,16 +290,13 @@ window.addEventListener("DOMContentLoaded", async () => {
         updateGrid();
     };
 
-    const handleDeleteFolder = (folderPath) => removePath(folderPath);
-
     async function removePath(folderPath) {
         try {
             const result = await api.removeFolder(folderPath);
             await refreshUi();
-            const removedBooks = result?.removed_books || 0;
             setStatus(
-                removedBooks > 0
-                    ? `Path removed — ${removedBooks} book(s) removed from the library.`
+                result.removed_books > 0
+                    ? `Path removed — ${result.removed_books} book(s) removed from the library.`
                     : "Path removed.",
                 "green"
             );
@@ -401,52 +310,49 @@ window.addEventListener("DOMContentLoaded", async () => {
     // ==========================================
     async function addPath() {
         const folder = await pickLibraryFolder(txtStatus);
-        if (folder) {
-            try {
-                await api.addFolder(folder);
-                await refreshUi();
-                setStatus(`Folder added: ${folder}`, "green");
-            } catch (err) {
-                setStatus("Error adding folder: " + err, "red");
-            }
+        if (!folder) return;
+        try {
+            await api.addFolder(folder);
+            await refreshUi();
+            setStatus(`Folder added: ${folder}`, "green");
+        } catch (err) {
+            setStatus("Error adding folder: " + err, "red");
         }
     }
 
     async function updateDatabase() {
         setStatus("Updating database...", "orange");
-        progressWrap.style.display = "";
-        progressFill.style.width = "0%";
+        scanProgress.hidden = false;
+        progressBar.value = 0;
         progressText.innerText = "Scanning files...";
-        if (btnUpdateDB) btnUpdateDB.disabled = true;
+        btnUpdateDB.disabled = true;
         try {
             const result = await api.updateDatabase();
             await refreshUi();
             setStatus(result, "green");
         } catch (err) {
             setStatus("Error: " + err, "red");
-            progressWrap.style.display = "none";
+            scanProgress.hidden = true;
         } finally {
-            if (btnUpdateDB) btnUpdateDB.disabled = false;
+            btnUpdateDB.disabled = false;
         }
     }
 
-    if (btnUpdateDB) {
-        btnUpdateDB.addEventListener("click", () => updateDatabase());
-    }
+    btnUpdateDB.addEventListener("click", () => updateDatabase());
+
+    const BACKUP_FILTERS = [{ name: "JSON Backup", extensions: ["json"] }];
 
     async function exportBackup() {
         try {
             const savePath = await window.__TAURI__.dialog.save({
                 title: "Export Database",
                 defaultPath: "pdf_library_backup.json",
-                filters: [{ name: "JSON Backup", extensions: ["json"] }]
+                filters: BACKUP_FILTERS
             });
-            if (savePath) {
-                const result = await api.exportDB(savePath);
-                setStatus(result, "green");
-                return result;
-            }
-            return null;
+            if (!savePath) return null;
+            const result = await api.exportDB(savePath);
+            setStatus(result, "green");
+            return result;
         } catch (err) {
             setStatus("Export error: " + err, "red");
             throw err;
@@ -458,15 +364,13 @@ window.addEventListener("DOMContentLoaded", async () => {
             const srcPath = await window.__TAURI__.dialog.open({
                 title: "Import Database",
                 multiple: false,
-                filters: [{ name: "JSON Backup", extensions: ["json"] }]
+                filters: BACKUP_FILTERS
             });
-            if (srcPath) {
-                const result = await api.importDB(srcPath);
-                await refreshUi();
-                setStatus(result, "green");
-                return result;
-            }
-            return null;
+            if (!srcPath) return null;
+            const result = await api.importDB(srcPath);
+            await refreshUi();
+            setStatus(result, "green");
+            return result;
         } catch (err) {
             setStatus("Import error: " + err, "red");
             throw err;
@@ -479,26 +383,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     // ==========================================
     function applyTheme(theme) {
         document.documentElement.setAttribute("data-theme", theme);
-        if (btnThemeToggle) {
-            btnThemeToggle.innerText = theme === "dark" ? "☀️" : "🌙";
-            btnThemeToggle.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
-        }
+        btnThemeToggle.innerText = theme === "dark" ? "☀️" : "🌙";
+        btnThemeToggle.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
         localStorage.setItem("theme", theme);
     }
 
-    // Load saved theme on startup
-    const savedTheme = localStorage.getItem("theme") || "light";
-    applyTheme(savedTheme);
-
-    if (btnThemeToggle) {
-        btnThemeToggle.addEventListener("click", () => {
-            const current = document.documentElement.getAttribute("data-theme") || "light";
-            applyTheme(current === "dark" ? "light" : "dark");
-        });
-    }
+    applyTheme(localStorage.getItem("theme") || "light");
+    btnThemeToggle.addEventListener("click", () => {
+        applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    });
 
     // ==========================================
-    // BEHAVIOUR — dùng chung cho Settings và nút Summary view trên toolbar
+    // BEHAVIOUR — dùng chung cho Settings và nút Behaviour trên toolbar
     // ==========================================
     function setClickBehavior(value) {
         state.clickBehavior = value;
@@ -510,62 +406,23 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
 
     // Nút Behaviour trên toolbar: hiện chế độ hiện tại, click mở menu chọn 1 trong 4
-    const BEHAVIOUR_CHOICES = [
-        { value: "select", label: "Manage", hint: "Click selects; double-click edits" },
-        { value: "open-default", label: "Read: default app", hint: "Click opens in your PDF viewer" },
-        { value: "open-reader", label: "Read: in-app", hint: "Click opens in the built-in reader" },
-        { value: "summary", label: "Summary", hint: "Click shows details on the right" },
-    ];
     function updateBehaviourButton() {
-        if (!btnBehaviour) return;
-        const current = BEHAVIOUR_CHOICES.find(c => c.value === state.clickBehavior) || BEHAVIOUR_CHOICES[0];
+        const current = BEHAVIOURS.find(c => c.value === state.clickBehavior) || BEHAVIOURS[0];
         btnBehaviour.innerText = `${current.label} ▾`;
         btnBehaviour.title = `Behaviour: ${current.label} — ${current.hint}`;
     }
-    function closeBehaviourMenu() {
-        document.querySelectorAll(".behaviour-menu").forEach(el => el.remove());
-        document.removeEventListener("mousedown", onBehaviourOutside, true);
-        document.removeEventListener("keydown", onBehaviourEscape, true);
-    }
-    function onBehaviourOutside(e) {
-        if (!e.target.closest(".behaviour-menu") && e.target !== btnBehaviour) closeBehaviourMenu();
-    }
-    function onBehaviourEscape(e) {
-        if (e.key === "Escape") { e.stopPropagation(); closeBehaviourMenu(); }
-    }
-    function openBehaviourMenu() {
-        closeBehaviourMenu();
-        const rect = btnBehaviour.getBoundingClientRect();
-        const menu = document.createElement("div");
-        menu.className = "behaviour-menu";
-        menu.style.cssText = `position:fixed; top:${rect.bottom + 4}px; right:${Math.max(8, window.innerWidth - rect.right)}px;
-            background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow-md);
-            padding:4px; z-index:1000; min-width:230px; font-size:13px; color:var(--text);`;
-        BEHAVIOUR_CHOICES.forEach(choice => {
-            const item = document.createElement("div");
+    bindMenuButton(btnBehaviour, () => {
+        const menu = showMenu(BEHAVIOURS.map(choice => {
             const selected = choice.value === state.clickBehavior;
-            item.style.cssText = "display:flex; gap:8px; padding:8px 10px; border-radius:6px; cursor:pointer;";
-            item.innerHTML = `<span style="width:14px; color:var(--primary);">${selected ? "✓" : ""}</span>
+            const content = el("span");
+            content.style.cssText = "display:flex; gap:8px;";
+            content.innerHTML = `<span style="width:14px; color:var(--primary);">${selected ? "✓" : ""}</span>
                 <span><div style="font-weight:${selected ? 600 : 500};">${choice.label}</div>
-                <div style="font-size:11px; color:var(--text-secondary);">${choice.hint}</div></span>`;
-            item.onmouseenter = () => item.style.background = "var(--hover)";
-            item.onmouseleave = () => item.style.background = "transparent";
-            item.onclick = () => {
-                closeBehaviourMenu();
-                if (choice.value !== state.clickBehavior) setClickBehavior(choice.value);
-            };
-            menu.appendChild(item);
-        });
-        document.body.appendChild(menu);
-        document.addEventListener("mousedown", onBehaviourOutside, true);
-        document.addEventListener("keydown", onBehaviourEscape, true);
-    }
-    if (btnBehaviour) {
-        btnBehaviour.addEventListener("click", () => {
-            if (document.querySelector(".behaviour-menu")) closeBehaviourMenu();
-            else openBehaviourMenu();
-        });
-    }
+                <div class="hint">${choice.hint}</div></span>`;
+            return { content, action: () => { if (!selected) setClickBehavior(choice.value); } };
+        }), btnBehaviour);
+        menu.style.minWidth = "230px";
+    });
     updateBehaviourButton();
 
     // ==========================================
@@ -581,56 +438,38 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     // Icon cho biết bấm vào sẽ chuyển sang kiểu nào
     function updateCardSizeToggle() {
-        if (!btnCardSizeToggle) return;
         const large = state.showShortDescription;
         btnCardSizeToggle.innerHTML = large ? ICON_SMALL_CARDS : ICON_LARGE_CARDS;
         btnCardSizeToggle.title = large ? "Switch to small cards" : "Switch to large cards (with short description)";
     }
-    if (btnCardSizeToggle) {
-        btnCardSizeToggle.addEventListener("click", () => setLargeCards(!state.showShortDescription));
-    }
+    btnCardSizeToggle.addEventListener("click", () => setLargeCards(!state.showShortDescription));
     updateCardSizeToggle();
 
     // ==========================================
     // SIDEBAR THU GỌN — nhớ trạng thái qua localStorage
     // ==========================================
-    const appShell = document.querySelector(".app-shell");
+    const appShell = $(".app-shell");
     function setSidebarCollapsed(collapsed) {
-        appShell?.classList.toggle("sidebar-collapsed", collapsed);
-        if (btnToggleSidebar) btnToggleSidebar.title = collapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)";
+        appShell.classList.toggle("sidebar-collapsed", collapsed);
+        btnToggleSidebar.title = collapsed ? "Show sidebar (Ctrl+B)" : "Hide sidebar (Ctrl+B)";
         localStorage.setItem("sidebarCollapsed", String(collapsed));
     }
     function toggleSidebar() {
-        setSidebarCollapsed(!appShell?.classList.contains("sidebar-collapsed"));
+        setSidebarCollapsed(!appShell.classList.contains("sidebar-collapsed"));
     }
     setSidebarCollapsed(localStorage.getItem("sidebarCollapsed") === "true");
-    if (btnToggleSidebar) btnToggleSidebar.addEventListener("click", toggleSidebar);
+    btnToggleSidebar.addEventListener("click", toggleSidebar);
 
-    if (btnFindDuplicates) {
-        btnFindDuplicates.addEventListener("click", () => {
-            openDuplicates(() => refreshUi());
-        });
-    }
-
-    if (btnAiAutoTag) {
-        btnAiAutoTag.addEventListener("click", () => {
-            const visibleBooks = state.books.filter(b => !b.hidden);
-            openAiAutoTag(
-                visibleBooks,
-                state.selectedBooks,
-                state.currentFilterPath,
-                () => refreshUi()
-            );
-        });
-    }
+    btnFindDuplicates.addEventListener("click", () => openDuplicates(() => refreshUi()));
+    btnAiAutoTag.addEventListener("click", () => openAi(state.selectedBooks));
 
     // Nút "AI Auto-Tag" chỉ hiện khi AI được bật (toggle "Activate AI" trong AI Settings).
     // Khi ẩn đi, "Find Duplicates" bỏ full-width để tự trôi lên chiếm chỗ của nó
     // trong lưới 2 cột — tránh để lại 1 ô trống nhìn lệch.
     function applyAiEnabledVisibility(enabled) {
         state.aiEnabled = enabled;
-        if (btnAiAutoTag) btnAiAutoTag.style.display = enabled ? "" : "none";
-        if (btnFindDuplicates) btnFindDuplicates.classList.toggle("full-width", enabled);
+        btnAiAutoTag.style.display = enabled ? "" : "none";
+        btnFindDuplicates.classList.toggle("full-width", enabled);
         // Nút "AI auto" trong summary panel hiện/ẩn theo trạng thái này
         refreshSummaryPanel(state.books);
     }
@@ -638,39 +477,26 @@ window.addEventListener("DOMContentLoaded", async () => {
         .then(s => applyAiEnabledVisibility(s.enabled !== false))
         .catch(() => {});
 
-    if (searchInput) {
-        searchInput.addEventListener("input", () => {
-            state.currentSearch = searchInput.value;
-            updateGrid();
-        });
-    }
+    searchInput.addEventListener("input", () => {
+        state.currentSearch = searchInput.value;
+        updateGrid();
+    });
 
-    if (sortSelect) {
-        sortSelect.addEventListener("change", () => {
-            state.currentSort = sortSelect.value;
-            updateGrid();
-        });
-    }
+    sortSelect.addEventListener("change", () => {
+        state.currentSort = sortSelect.value;
+        updateGrid();
+    });
 
-    if (tagSearchInput) {
-        tagSearchInput.addEventListener("input", () => {
-            renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
-                handleTagSelectionChange, handleTagRenamed, handleTagDeleted,
-                state.untaggedOnly, handleUntaggedToggle);
-        });
-    }
+    tagSearchInput.addEventListener("input", renderTags);
 
     // ==========================================
     // TAG MANAGEMENT CALLBACKS
     // ==========================================
-    function handleTagSelectionChange(newTags) {
-        state.selectedTags = newTags;
-        updateGrid();
-    }
-
-    function handleUntaggedToggle(newUntagged) {
-        state.untaggedOnly = newUntagged;
-        updateGrid();
+    function renderTags() {
+        renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
+            (newTags) => { state.selectedTags = newTags; updateGrid(); },
+            handleTagRenamed, handleTagDeleted,
+            state.untaggedOnly, (newUntagged) => { state.untaggedOnly = newUntagged; updateGrid(); });
     }
 
     async function handleTagRenamed(oldName, newName) {
@@ -701,10 +527,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         state.tags  = await api.getTags();
         const paths = await api.getFolders();
 
-        renderSidebar(sidebarContainer, paths, handleFolderSelection, handleDeleteFolder, state.books);
-        renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
-            handleTagSelectionChange, handleTagRenamed, handleTagDeleted,
-            state.untaggedOnly, handleUntaggedToggle);
+        renderSidebar(sidebarContainer, paths, handleFolderSelection, removePath, state.books);
+        renderTags();
 
         updateTrashButton();
         updateSelectionUI();
@@ -713,9 +537,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
 
     function updateGrid() {
-        const visibleBooks = state.viewMode === "trash"
-            ? state.books.filter(b => b.hidden)
-            : state.books.filter(b => !b.hidden);
+        const visibleBooks = state.books.filter(b => b.hidden === (state.viewMode === "trash"));
 
         renderAssetGrid(
             assetGridContainer,
@@ -733,14 +555,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.showShortDescription
         );
 
-        persistLastFilters();
-        updateJumpLastButton();
-    }
-
-    // Mirrors the live filter state to localStorage on every grid re-render so
-    // f_reader.js can snapshot "what was I looking at" into its own saved
-    // reading position without importing main.js — see f_reading_history.js.
-    function persistLastFilters() {
+        // Mirrors the live filter state to localStorage on every grid re-render so
+        // f_reader.js can snapshot "what was I looking at" into its own saved
+        // reading position without importing main.js — see f_reading_history.js.
         writeCurrentFilters({
             currentFilterPath: state.currentFilterPath,
             currentSearch: state.currentSearch,
@@ -748,29 +565,24 @@ window.addEventListener("DOMContentLoaded", async () => {
             selectedTags: state.selectedTags,
             untaggedOnly: state.untaggedOnly,
         });
-    }
-
-    function findBookByPath(path) {
-        return state.books.find(b => b.path === path && !b.hidden) || null;
+        updateJumpLastButton();
     }
 
     // The saved entries whose book still exists and isn't hidden/trashed —
     // what's actually offered, in {entry, book} pairs, most-recent first.
     function validLastReadEntries() {
         return readList()
-            .map(entry => ({ entry, book: findBookByPath(entry.path) }))
+            .map(entry => ({ entry, book: state.books.find(b => b.path === entry.path && !b.hidden) }))
             .filter(x => x.book);
     }
 
     // Only offered in Read Mode "open-reader" (per the feature's own scope —
     // multi-select/Manage mode has no use for a reading-position shortcut).
     function updateJumpLastButton() {
-        closeJumpLastDropdown(); // contents may be stale after this refresh
-        if (!btnJumpLast) return;
         const entries = validLastReadEntries();
         const show = state.clickBehavior === "open-reader" && entries.length > 0;
         btnJumpLast.style.display = show ? "" : "none";
-        if (btnJumpLastArrow) btnJumpLastArrow.style.display = show ? "" : "none";
+        btnJumpLastArrow.style.display = show ? "" : "none";
         if (show) {
             const { entry, book } = entries[0];
             btnJumpLast.title = `Continue reading "${book.file_name}" — page ${entry.page}`;
@@ -780,7 +592,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Marks the matching sidebar folder item active without a full sidebar
     // re-render — mirrors the data-path convention set in f_sidebar.js.
     function highlightActiveFolder(path) {
-        if (!sidebarContainer) return;
         const target = path === null ? "all" : path;
         sidebarContainer.querySelectorAll(".sidebar-item").forEach(item => {
             item.classList.toggle("active", item.dataset.path === target);
@@ -801,156 +612,86 @@ window.addEventListener("DOMContentLoaded", async () => {
         state.untaggedOnly = !!f.untaggedOnly;
         state.selectedBooks.clear();
 
-        if (searchInput) searchInput.value = state.currentSearch;
-        if (sortSelect) sortSelect.value = state.currentSort;
+        searchInput.value = state.currentSearch;
+        sortSelect.value = state.currentSort;
         highlightActiveFolder(state.currentFilterPath);
-        renderTagsUI(tagContainer, tagSearchInput, state.tags, state.selectedTags,
-            handleTagSelectionChange, handleTagRenamed, handleTagDeleted,
-            state.untaggedOnly, handleUntaggedToggle);
+        renderTags();
         updateSelectionUI();
         updateGrid();
 
         openReader(book, entry.page);
     }
 
-    if (btnJumpLast) {
-        btnJumpLast.addEventListener("click", () => {
-            closeJumpLastDropdown();
-            const entries = validLastReadEntries();
-            if (!entries.length) {
-                updateJumpLastButton(); // saved book(s) gone — hide and bail
-                return;
-            }
-            jumpToEntry(entries[0].entry, entries[0].book);
-        });
-    }
+    btnJumpLast.addEventListener("click", () => {
+        const entries = validLastReadEntries();
+        if (!entries.length) {
+            updateJumpLastButton(); // saved book(s) gone — hide and bail
+            return;
+        }
+        jumpToEntry(entries[0].entry, entries[0].book);
+    });
 
     // ==========================================
     // "Continue reading" dropdown — last up-to-3 distinct books, each
     // showing its page and (if any were active for that session) its tags.
     // ==========================================
-    let jumpLastDropdownEl = null;
-
-    function closeJumpLastDropdown() {
-        if (!jumpLastDropdownEl) return;
-        jumpLastDropdownEl.remove();
-        jumpLastDropdownEl = null;
-        document.removeEventListener("mousedown", onJumpLastDropdownOutsideClick, true);
-        document.removeEventListener("keydown", onJumpLastDropdownEscape, true);
-    }
-
-    function onJumpLastDropdownOutsideClick(e) {
-        if (jumpLastDropdownEl && !jumpLastDropdownEl.contains(e.target) && e.target !== btnJumpLastArrow) {
-            closeJumpLastDropdown();
-        }
-    }
-
-    function onJumpLastDropdownEscape(e) {
-        if (e.key === "Escape") closeJumpLastDropdown();
-    }
-
     function openJumpLastDropdown() {
-        closeJumpLastDropdown();
         const entries = validLastReadEntries();
-        if (!entries.length || !btnJumpLastArrow) return;
+        if (!entries.length) return;
 
-        const panel = document.createElement("div");
-        panel.className = "context-menu"; // reuse the existing popover look
-        const rect = btnJumpLastArrow.getBoundingClientRect();
-        panel.style.cssText = `
-            position: fixed;
-            top: ${rect.bottom + 4}px;
-            left: ${rect.left}px;
-            min-width: 220px;
-            max-width: 320px;
-            z-index: 10000;
-        `;
-
-        entries.forEach(({ entry, book }) => {
-            const row = document.createElement("div");
-            row.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px; cursor:pointer;";
-            row.addEventListener("mouseenter", () => row.style.background = "var(--hover)");
-            row.addEventListener("mouseleave", () => row.style.background = "transparent");
-
-            const textCol = document.createElement("div");
+        const menu = showMenu(entries.map(({ entry, book }) => {
+            const content = el("span");
+            content.style.cssText = "display:flex; align-items:center; gap:8px; flex:1; min-width:0;";
+            const textCol = el("div");
             textCol.style.cssText = "flex:1; min-width:0;";
-
-            const titleEl = document.createElement("div");
-            titleEl.style.cssText = "font-size:13px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-            titleEl.innerText = `${book.file_name} — p.${entry.page}`;
+            const ellipsis = "overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+            const titleEl = el("div", "", `${book.file_name} — p.${entry.page}`);
+            titleEl.style.cssText = ellipsis;
             textCol.appendChild(titleEl);
 
             const tags = entry.filters?.selectedTags;
             if (Array.isArray(tags) && tags.length > 0) {
-                const tagsEl = document.createElement("div");
-                tagsEl.style.cssText = "font-size:11px; color:var(--text-secondary); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-                tagsEl.innerText = tags.join(", ");
+                const tagsEl = el("div", "hint", tags.join(", "));
+                tagsEl.style.cssText = "margin-top:2px;" + ellipsis;
                 textCol.appendChild(tagsEl);
             }
-
-            row.appendChild(textCol);
 
             // Pins this session so it's kept regardless of the normal
             // "last 3" rotation — same action as the reader toolbar's own
             // bookmark button (both go through f_reading_history.js).
-            const bookmarkBtn = document.createElement("span");
-            bookmarkBtn.innerText = "🔖";
+            const bookmarkBtn = el("span", "", "🔖");
             bookmarkBtn.title = entry.bookmarked ? "Remove bookmark" : "Bookmark this session";
             bookmarkBtn.style.cssText = `flex-shrink:0; cursor:pointer; font-size:14px; line-height:1; opacity:${entry.bookmarked ? "1" : "0.3"};`;
             bookmarkBtn.addEventListener("click", (e) => {
-                e.stopPropagation(); // don't also trigger the row's own jump-to click below
+                e.stopPropagation(); // don't also trigger the row's own jump-to click
                 toggleBookmark(entry.path);
                 // Rebuild in place — simplest way to keep every row's icon
                 // state and the button's own visibility/title all consistent.
+                menu.hidePopover();
                 updateJumpLastButton();
-                if (validLastReadEntries().length > 0) openJumpLastDropdown();
-            });
-            row.appendChild(bookmarkBtn);
-
-            row.addEventListener("click", () => {
-                closeJumpLastDropdown();
-                jumpToEntry(entry, book);
+                openJumpLastDropdown();
             });
 
-            panel.appendChild(row);
-        });
-
-        document.body.appendChild(panel);
-        jumpLastDropdownEl = panel;
-
-        // Safe to attach immediately (no defer needed): mousedown always fires
-        // before the click that opened this dropdown, so this can't catch that
-        // same click. Deferring it was actually a latent listener leak — if
-        // something else called closeJumpLastDropdown() in between a deferred
-        // attach and its scheduled run, the attach would still fire afterward
-        // with jumpLastDropdownEl already null, leaving these listeners with
-        // nothing left to ever remove them.
-        document.addEventListener("mousedown", onJumpLastDropdownOutsideClick, true);
-        document.addEventListener("keydown", onJumpLastDropdownEscape, true);
+            content.append(textCol, bookmarkBtn);
+            return { content, action: () => jumpToEntry(entry, book) };
+        }), btnJumpLastArrow);
+        menu.style.minWidth = "220px";
+        menu.style.maxWidth = "320px";
     }
-
-    if (btnJumpLastArrow) {
-        btnJumpLastArrow.addEventListener("click", (e) => {
-            e.stopPropagation();
-            if (jumpLastDropdownEl) closeJumpLastDropdown();
-            else openJumpLastDropdown();
-        });
-    }
+    bindMenuButton(btnJumpLastArrow, openJumpLastDropdown);
 
     function setStatus(msg, color = "inherit") {
-        if (txtStatus) {
-            txtStatus.innerText = msg;
-            txtStatus.style.color = color;
-        }
+        txtStatus.innerText = msg;
+        txtStatus.style.color = color;
     }
 
     // ==========================================
     // KEYBOARD SHORTCUTS
     // ==========================================
     document.addEventListener("keydown", (e) => {
-        // Bỏ qua khi đang focus vào input/textarea
+        // Bỏ qua khi đang gõ trong input/textarea, hoặc khi modal / menu đang mở
         const tag = document.activeElement?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || overlayOpen()) return;
 
         // Escape — bỏ chọn tất cả
         if (e.key === "Escape") {
@@ -972,8 +713,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Ctrl/Cmd + F — focus ô tìm kiếm
         if ((e.ctrlKey || e.metaKey) && e.key === "f") {
             e.preventDefault();
-            searchInput?.focus();
-            searchInput?.select();
+            searchInput.focus();
+            searchInput.select();
         }
     });
 

@@ -1,3 +1,5 @@
+import { el, showMenu, isInFolder } from "./ui.js";
+
 // f_sidebar.js
 // Render sidebar folder list
 // Dùng CSS classes từ styles.css — không dùng inline styles
@@ -22,7 +24,7 @@ export function renderSidebar(sidebarContainer, folders, onSelectCallback, onDel
 
   // Các folder
   folders.forEach((folderPath) => {
-    const count = books.filter(b => !b.hidden && isBookInFolder(b.path, folderPath)).length;
+    const count = books.filter(b => !b.hidden && isInFolder(b.path, folderPath)).length;
     const folderName = folderPath.split('\\').pop() || folderPath.split('/').pop() || folderPath;
 
     const folderItem = createSidebarItem({
@@ -75,37 +77,21 @@ function setActiveItem(container, activeItem) {
 
 // Context menu right-click folder
 function showFolderContextMenu(x, y, folderPath, onDeleteCallback) {
-  document.querySelectorAll(".context-menu").forEach(m => m.remove());
-
-  const menu = document.createElement("div");
-  menu.className = "context-menu";
-  menu.style.cssText = `position:fixed; top:${y}px; left:${x}px; z-index:10000;`;
-
-  const deleteItem = document.createElement("div");
-  deleteItem.style.cssText = "padding:9px 12px; cursor:pointer; border-radius:6px; color:var(--danger); display:flex; align-items:center; gap:8px;";
-  deleteItem.innerHTML = `
+  const content = el("span");
+  content.style.cssText = "display:flex; align-items:center; gap:8px;";
+  content.innerHTML = `
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
     Remove folder from library
   `;
-  deleteItem.onmouseenter = () => deleteItem.style.background = "var(--danger-soft)";
-  deleteItem.onmouseleave = () => deleteItem.style.background = "transparent";
-  deleteItem.onclick = async () => {
-    menu.remove();
-    const ok = await window.__TAURI__.dialog.confirm(
-      `Remove this folder from library?\n\n${folderPath}\n\n(Books stay until you click Update Database)`,
-      { title: "Remove folder", kind: "warning" }
-    );
-    if (ok) onDeleteCallback(folderPath);
-  };
-
-  menu.appendChild(deleteItem);
-  document.body.appendChild(menu);
-  setTimeout(() => {
-    document.addEventListener("click", () => menu.remove(), { once: true });
-  }, 0);
-}
-
-function isBookInFolder(bookPath, folderPath) {
-  const normalizedFolder = folderPath.replace(/[\\/]+$/, "");
-  return bookPath.startsWith(normalizedFolder + "\\") || bookPath.startsWith(normalizedFolder + "/");
+  showMenu([{
+    content,
+    danger: true,
+    action: async () => {
+      const ok = await window.__TAURI__.dialog.confirm(
+        `Remove this folder from library?\n\n${folderPath}\n\n(Books stay until you click Update Database)`,
+        { title: "Remove folder", kind: "warning" }
+      );
+      if (ok) onDeleteCallback(folderPath);
+    },
+  }], { x, y });
 }

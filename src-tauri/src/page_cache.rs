@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
-use tauri::Manager;
 
 // =============================================
 // page_cache.rs — On-disk cache of rendered reader pages
@@ -62,33 +60,24 @@ impl Default for PageCacheSettings {
 // Same convention as ai_service.rs: a small JSON file next to the book database.
 
 fn settings_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("page_cache_settings.json"))
+    Ok(crate::db::app_dir(app_handle)?.join("page_cache_settings.json"))
 }
 
-pub fn get_page_cache_settings(app_handle: &tauri::AppHandle) -> Result<PageCacheSettings, String> {
-    let path = settings_path(app_handle)?;
-    if !path.exists() {
-        return Ok(PageCacheSettings::default());
-    }
-    let s = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    Ok(serde_json::from_str(&s).unwrap_or_default())
+#[tauri::command]
+pub fn get_page_cache_settings(app_handle: tauri::AppHandle) -> Result<PageCacheSettings, String> {
+    crate::db::read_json(&settings_path(&app_handle)?)
 }
 
+#[tauri::command]
 pub fn save_page_cache_settings(
-    app_handle: &tauri::AppHandle,
+    app_handle: tauri::AppHandle,
     settings: PageCacheSettings,
 ) -> Result<String, String> {
-    let path = settings_path(app_handle)?;
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+    crate::db::write_json(&settings_path(&app_handle)?, &settings)?;
 
     // Apply a lowered cap immediately rather than waiting for future page
     // renders to slowly trim the cache down.
-    if let Ok(dir) = cache_dir(app_handle) {
+    if let Ok(dir) = cache_dir(&app_handle) {
         evict_if_needed(&dir, settings.max_size_mb);
     }
     Ok("Settings saved".to_string())
@@ -97,22 +86,9 @@ pub fn save_page_cache_settings(
 // ===== CACHE STORAGE =====
 
 fn cache_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("cache")
-        .join("pages");
-    if !dir.exists() {
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    }
+    let dir = crate::db::app_dir(app_handle)?.join("cache").join("pages");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
-}
-
-fn path_hash(pdf_path: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(pdf_path.as_bytes());
-    format!("{:x}", hasher.finalize())
 }
 
 fn source_mtime_secs(pdf_path: &str) -> Option<u64> {
@@ -126,7 +102,7 @@ fn source_mtime_secs(pdf_path: &str) -> Option<u64> {
 }
 
 fn cache_file_name(pdf_path: &str, mtime: u64, page_index: u16, width: i32) -> String {
-    format!("page_{}_{}_{}_{}.jpg", path_hash(pdf_path), mtime, page_index, width)
+    format!("page_{}_{}_{}_{}.jpg", crate::db::path_hash(pdf_path), mtime, page_index, width)
 }
 
 // Cache hit → path to the cached JPEG. None on a miss, when the cache is
@@ -145,11 +121,7 @@ pub fn lookup(
     let mtime = source_mtime_secs(pdf_path)?;
     let dir = cache_dir(app_handle).ok()?;
     let file = dir.join(cache_file_name(pdf_path, mtime, page_index, width));
-    if file.exists() {
-        Some(file)
-    } else {
-        None
-    }
+    file.exists().then_some(file)
 }
 
 // Best-effort write-through after a fresh render — never fails the render
@@ -220,8 +192,9 @@ fn mtime_from_file_name(path: &Path) -> Option<u64> {
 
 // Deletes every cached page unconditionally — for the "Purge reader cache"
 // settings button, not part of the automatic size-cap eviction above.
-pub fn clear_page_cache(app_handle: &tauri::AppHandle) -> Result<String, String> {
-    let dir = cache_dir(app_handle)?;
+#[tauri::command]
+pub fn clear_page_cache(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let dir = cache_dir(&app_handle)?;
 
     let mut count: u64 = 0;
     let mut freed: u64 = 0;

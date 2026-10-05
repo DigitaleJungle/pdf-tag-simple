@@ -3,7 +3,6 @@ const { invoke } = window.__TAURI__.core;
 export const api = {
     getFolders: () => invoke("get_library_folders"),
     getBooks: () => invoke("get_library_books"),
-    getThumbnail: (path) => invoke("get_thumbnail_bytes", { bookPath: path }),
     getTags: () => invoke("get_all_tags"),
 
     addFolder: (path) => invoke("add_library_folder", { newPath: path }),
@@ -43,10 +42,10 @@ export const api = {
     getAiSettings: () => invoke("get_ai_settings"),
     saveAiSettings: (settings) => invoke("save_ai_settings", { settings }),
 
-    // Suggest tags cho 1 batch sách — trả về [{path, file_name, suggested_tags, error}]
-    // Frontend dùng để hiện preview trước khi apply
-    // options = { tags, short_description, description } — những gì AI cần điền
-    suggestTagsBatch: (books, options) => invoke("suggest_tags_batch", { books, options }),
+    // Suggest tags / descriptions cho 1 sách — trả về {path, file_name, suggested_tags, short_description, description, error}
+    // Reject = lỗi chung (key sai, hết quota...) → dừng cả lượt chạy
+    // options = { tags, short_description, description, extra_prompt, input_mode }
+    suggestTags: (book, options) => invoke("suggest_tags", { book, options }),
 
     // Kiểm tra Ollama có đang chạy ở host không
     checkOllama: (host) => invoke("check_ollama", { host }),

@@ -5,8 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use std::time::Duration;
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -53,9 +52,6 @@ static TOKEN_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 struct ChatGptAuth {
-    // ID cố định của máy này, tạo 1 lần. Hiện chưa gửi lên (SDK mẫu của OpenAI
-    // mặc định tắt) — giữ lại để bật khi OpenAI yêu cầu.
-    ext_agent_host_id: String,
     // client_id OpenAI cấp khi đăng ký (oaiapp_...) — rỗng nếu chưa đăng ký
     #[serde(default)]
     client_id: String,
@@ -112,26 +108,11 @@ struct IdClaims {
 // ===== STORAGE =====
 
 fn auth_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    }
-    Ok(dir.join("chatgpt_auth.json"))
+    Ok(crate::db::app_dir(app_handle)?.join("chatgpt_auth.json"))
 }
 
 fn load(app_handle: &tauri::AppHandle) -> Result<ChatGptAuth, String> {
-    let path = auth_path(app_handle)?;
-    let mut auth: ChatGptAuth = if path.exists() {
-        let s = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&s).unwrap_or_default()
-    } else {
-        ChatGptAuth::default()
-    };
-    if auth.ext_agent_host_id.is_empty() {
-        auth.ext_agent_host_id = format!("urn:uuid:{}", uuid::Uuid::new_v4());
-        save(app_handle, &auth)?;
-    }
-    Ok(auth)
+    crate::db::read_json(&auth_path(app_handle)?)
 }
 
 // Ghi vào file tạm rồi rename — không bao giờ để lại file credentials ghi dở
@@ -143,13 +124,6 @@ fn save(app_handle: &tauri::AppHandle, auth: &ChatGptAuth) -> Result<(), String>
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 fn random_token() -> String {
     let mut buf = [0u8; 32];
     getrandom::getrandom(&mut buf).expect("OS random number generator unavailable");
@@ -157,29 +131,31 @@ fn random_token() -> String {
 }
 
 fn is_signed_in(auth: &ChatGptAuth) -> bool {
-    !auth.refresh_token.is_empty() || (!auth.access_token.is_empty() && auth.expires_at > now())
+    !auth.refresh_token.is_empty() || (!auth.access_token.is_empty() && auth.expires_at > crate::db::now())
 }
 
 // ===== PUBLIC API =====
 
-pub fn status(app_handle: &tauri::AppHandle) -> Result<ChatGptStatus, String> {
-    let auth = load(app_handle)?;
+#[tauri::command]
+pub fn chatgpt_status(app_handle: tauri::AppHandle) -> Result<ChatGptStatus, String> {
+    let auth = load(&app_handle)?;
     Ok(ChatGptStatus { signed_in: is_signed_in(&auth), email: auth.email })
 }
 
-// Quên hết account (giữ ext_agent_host_id). Lần sign-in sau sẽ đăng ký lại,
-// nên có thể đổi sang account ChatGPT khác.
-pub fn sign_out(app_handle: &tauri::AppHandle) -> Result<(), String> {
+// Quên hết account. Lần sign-in sau sẽ đăng ký lại, nên có thể đổi sang account ChatGPT khác.
+#[tauri::command]
+pub fn chatgpt_sign_out(app_handle: tauri::AppHandle) -> Result<(), String> {
     CANCEL_SIGN_IN.notify_waiters();
-    let auth = load(app_handle)?;
-    save(app_handle, &ChatGptAuth { ext_agent_host_id: auth.ext_agent_host_id, ..Default::default() })
+    save(&app_handle, &ChatGptAuth::default())
 }
 
-pub fn cancel_sign_in() {
+#[tauri::command]
+pub fn chatgpt_cancel_sign_in() {
     CANCEL_SIGN_IN.notify_waiters();
 }
 
-pub async fn sign_in(app_handle: tauri::AppHandle) -> Result<ChatGptStatus, String> {
+#[tauri::command]
+pub async fn chatgpt_sign_in(app_handle: tauri::AppHandle) -> Result<ChatGptStatus, String> {
     // Hủy lần sign-in cũ còn đang chờ (nếu có)
     CANCEL_SIGN_IN.notify_waiters();
     let cancelled = CANCEL_SIGN_IN.notified();
@@ -246,8 +222,7 @@ async fn authorize(
     let registering = auth.client_id.is_empty();
     let request_client_id = if registering { REGISTRATION_CLIENT_ID.to_string() } else { auth.client_id.clone() };
 
-    // Giống SDK mẫu của OpenAI: không gửi ext_agent_host_id (mặc định tắt, chỉ
-    // dành cho deployment tương thích) và không đưa token cũ vào URL browser.
+    // Giống SDK mẫu của OpenAI: không đưa token cũ vào URL browser.
     let mut url = url::Url::parse(AUTHORIZE_URL).map_err(|e| e.to_string())?;
     {
         let mut q = url.query_pairs_mut();
@@ -338,7 +313,7 @@ pub async fn access_token(app_handle: &tauri::AppHandle) -> Result<String, Strin
     let _guard = TOKEN_LOCK.lock().await;
     let mut auth = load(app_handle)?;
 
-    if !auth.access_token.is_empty() && auth.expires_at - EXPIRY_MARGIN_SECS > now() {
+    if !auth.access_token.is_empty() && auth.expires_at - EXPIRY_MARGIN_SECS > crate::db::now() {
         return Ok(auth.access_token);
     }
     if auth.refresh_token.is_empty() {
@@ -379,8 +354,9 @@ pub async fn access_token(app_handle: &tauri::AppHandle) -> Result<String, Strin
     }
 }
 
-pub async fn list_models(app_handle: &tauri::AppHandle) -> Result<Vec<ChatGptModel>, String> {
-    let token = access_token(app_handle).await?;
+#[tauri::command]
+pub async fn chatgpt_list_models(app_handle: tauri::AppHandle) -> Result<Vec<ChatGptModel>, String> {
+    let token = access_token(&app_handle).await?;
     let response = reqwest::Client::new()
         .get(format!("{}/models", RESOURCE))
         .bearer_auth(token)
@@ -412,7 +388,7 @@ fn apply_tokens(auth: &mut ChatGptAuth, tokens: TokenResponse) {
     if let Some(refresh) = tokens.refresh_token {
         auth.refresh_token = refresh;
     }
-    auth.expires_at = now() + tokens.expires_in.unwrap_or(3600);
+    auth.expires_at = crate::db::now() + tokens.expires_in.unwrap_or(3600);
 }
 
 fn is_terminal_refresh_error(code: &str) -> bool {

@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { addCover } from "./ui.js";
 
 // =============================================
 // createCard — tạo 1 card sách trong grid
@@ -70,7 +71,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     // --- Star button (góc trên phải) ---
     // Click star → toggle starred, cập nhật visual ngay, lưu vào database
     // Không re-render grid — chỉ update icon + book.starred local
-    let starred = book.starred || false;
+    const starred = !!book.starred;
 
     const starBtn = document.createElement("div");
     starBtn.style.cssText = `
@@ -91,16 +92,11 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
         e.preventDefault();
         try {
             const newState = await api.toggleStar(book.path);
-            starred = newState;
             book.starred = newState; // Update local object — sort sẽ dùng giá trị này
             starBtn.style.opacity = newState ? "1" : "0.25";
             starBtn.title = newState ? "Unstar" : "Star";
             starBtn.style.transform = "scale(1.4)";
             setTimeout(() => starBtn.style.transform = "scale(1)", 150);
-            // Notify main.js re-sort grid mà không reload thumbnail
-            if (window.__APP_ACTIONS__?.onStarToggled) {
-                window.__APP_ACTIONS__.onStarToggled(book.path, newState);
-            }
         } catch (err) {
             console.error("Toggle star fail:", err);
         }
@@ -124,6 +120,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
         font-size: 28px;
     `;
     thumbArea.innerHTML = "📕";
+    addCover(thumbArea, book.thumbnail_path);
 
     // --- Title ---
     const title = document.createElement("p");
@@ -231,44 +228,6 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
         card.appendChild(tagsWrap);
     }
 
-    // --- Lazy load thumbnail ---
-    let loaded = false;
-    let objectUrl = null;
-
-    const loadThumbnail = async () => {
-        if (loaded) return;
-        loaded = true;
-        try {
-            const bytes = await api.getThumbnail(book.path);
-            if (bytes && bytes.length > 0) {
-                const blob = new Blob([new Uint8Array(bytes)], { type: "image/jpeg" });
-                objectUrl = URL.createObjectURL(blob);
-                const img = document.createElement("img");
-                img.src = objectUrl;
-                img.style.cssText = "width: 100%; height: 100%; object-fit: cover;";
-                img.loading = "lazy";
-                thumbArea.innerHTML = "";
-                thumbArea.appendChild(img);
-            }
-        } catch (err) {
-            console.error("Load thumbnail fail:", book.file_name, err);
-        }
-    };
-
-    if ("IntersectionObserver" in window) {
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    loadThumbnail();
-                    observer.disconnect();
-                }
-            });
-        }, { root: null, rootMargin: "300px", threshold: 0.01 });
-        observer.observe(card);
-    } else {
-        loadThumbnail();
-    }
-
     // --- Events ---
     // Single click toggles selection after a short delay, so a following second
     // click (the start of a double-click) can cancel it before it applies — this
@@ -331,10 +290,6 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     card.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         onContextMenu(e.clientX, e.clientY, book);
-    });
-
-    card.addEventListener("remove", () => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
     });
 
     // Expose update visual từ bên ngoài

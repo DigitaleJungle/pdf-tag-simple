@@ -238,25 +238,6 @@ a { color: var(--primary); text-decoration: none; }
   border-color: var(--border-strong);
 }
 
-/* Primary button */
-.btn-primary {
-  background: var(--primary) !important;
-  color: white !important;
-  border-color: var(--primary) !important;
-}
-
-.btn-primary:hover {
-  background: var(--primary-hover) !important;
-  border-color: var(--primary-hover) !important;
-}
-
-/* Danger button */
-.btn-danger {
-  background: var(--danger-soft) !important;
-  color: var(--danger) !important;
-  border-color: var(--danger) !important;
-}
-
 /* Full width button (span 2 cols) */
 .toolbar button.full-width {
   grid-column: span 2;
@@ -369,10 +350,9 @@ a { color: var(--primary); text-decoration: none; }
 .tag-chip {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
@@ -391,6 +371,9 @@ a { color: var(--primary); text-decoration: none; }
   color: white;
   border-color: var(--primary);
 }
+
+.tag-chip.muted { color: var(--text-secondary); }
+.tag-chip.italic { font-style: italic; }
 
 /* Trash + Settings — pinned outside the scrolling sidebar-inner */
 .sidebar-footer {
@@ -464,48 +447,11 @@ a { color: var(--primary); text-decoration: none; }
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
 }
 
-/* Card — inline styles từ JS sẽ dần migrate sang đây */
-/* Hiện tại dùng class .book-card khi refactor JS */
-.book-card {
-  background: var(--panel);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
-  padding: 10px;
-  cursor: pointer;
-  transition: box-shadow var(--transition), transform var(--transition);
-  user-select: none;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.book-card:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
-}
-
-.book-card.selected {
-  box-shadow: 0 0 0 2px var(--primary), var(--shadow-card);
-  background: var(--active-bg);
-}
-
 /* Lazy load sentinel */
 .grid-sentinel {
   width: 100%;
   height: 50px;
   grid-column: 1 / -1;
-}
-
-/* Context menu */
-.context-menu {
-  z-index: 10000;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  padding: 4px;
-  min-width: 200px;
-  font-size: 13px;
 }
 
 /* ------------------------------------------------
@@ -637,6 +583,207 @@ a { color: var(--primary); text-decoration: none; }
 .summary-tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .summary-tag { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); }
 .summary-meta { font-size: 11px; line-height: 1.5; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------
+   SHARED UI — features/ui.js (modals, menus, form controls)
+------------------------------------------------ */
+.label { font-size: 13px; font-weight: 600; color: var(--text); }
+.hint { font-size: 11px; color: var(--text-secondary); }
+.status { font-size: 12px; color: var(--text-secondary); }
+.status.ok { color: var(--success); }
+.status.error { color: var(--danger); }
+
+.field {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  background: var(--panel);
+  color: var(--text);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+textarea.field { resize: vertical; }
+.field:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn.small { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: white; font-weight: 600; padding-inline: 16px; }
+.btn.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn.success { background: var(--success); border-color: var(--success); color: white; font-weight: 600; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: white; font-weight: 600; }
+.btn.danger-outline { border-color: var(--danger); color: var(--danger); }
+
+.close-btn {
+  border: none;
+  background: var(--hover);
+  color: var(--text);
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+/* Modal = native <dialog> (top layer: luôn nằm trên reader, Esc tự đóng) */
+.modal {
+  margin: auto;
+  max-height: 90vh;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.modal[open] { display: flex; flex-direction: column; }
+.modal::backdrop { background: rgba(0, 0, 0, 0.4); }
+.modal-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.modal-title { font-size: 18px; font-weight: 700; }
+.modal-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.modal-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; flex: 1; }
+.modal-footer {
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-soft);
+  flex-shrink: 0;
+}
+.modal-footer .spacer { flex: 1; font-size: 12px; color: var(--text-secondary); }
+
+/* Menu = popover (click ra ngoài / Esc tự đóng) */
+.menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+  min-width: 200px;
+  max-width: 340px;
+  font-size: 13px;
+}
+.menu-item { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 6px; cursor: pointer; }
+.menu-item:hover { background: var(--hover); }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger:hover { background: var(--danger-soft); }
+
+/* Chips (tag editor) */
+.chip-editor {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 52px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+}
+.chip-editor input { border: none; outline: none; flex: 1; min-width: 150px; font-size: 13px; padding: 4px 2px; background: transparent; color: var(--text); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+.chip button { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 13px; font-weight: bold; padding: 0; line-height: 1; }
+.chip-editor.remove .chip { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+.tag-suggest-dropdown {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  max-height: 180px;
+  overflow-y: auto;
+}
+.tag-suggest-dropdown div { padding: 7px 10px; cursor: pointer; font-size: 13px; color: var(--text); border-radius: 6px; }
+.tag-suggest-dropdown div.highlighted { background: var(--hover); }
+
+progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: none;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border);
+}
+progress::-webkit-progress-bar { background: var(--border); }
+progress::-webkit-progress-value { background: var(--primary); transition: width 0.2s; }
+
+/* Toggle switch = checkbox */
+input.switch {
+  appearance: none;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+input.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: left var(--transition);
+}
+input.switch:checked { background: var(--primary); }
+input.switch:checked::after { left: 20px; }
+
+/* Ảnh bìa (asset protocol) phủ lên emoji placeholder; lỗi → img bị gỡ */
+.cover { position: relative; overflow: hidden; }
+.cover > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
 
 /* ------------------------------------------------
    10. RESPONSIVE

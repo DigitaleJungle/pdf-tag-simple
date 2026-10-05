@@ -6,111 +6,6 @@ mod ai_service;
 mod chatgpt_auth;
 mod page_cache;
 
-#[tauri::command]
-fn add_library_folder(
-    app_handle: tauri::AppHandle,
-    new_path: String,
-) -> Result<Vec<String>, String> {
-    db::add_library_folder(app_handle, new_path)
-}
-
-#[tauri::command]
-fn get_library_folders(app_handle: tauri::AppHandle) -> Vec<String> {
-    db::get_folders_list(&app_handle)
-}
-
-#[tauri::command]
-fn remove_library_folder(
-    app_handle: tauri::AppHandle,
-    folder_path: String,
-) -> Result<db::RemoveFolderResult, String> {
-    db::remove_library_folder(app_handle, folder_path)
-}
-
-#[tauri::command]
-fn get_library_books(app_handle: tauri::AppHandle) -> Result<Vec<db::BookEntry>, String> {
-    db::get_library_books(app_handle)
-}
-
-#[tauri::command]
-fn get_thumbnail_bytes(
-    app_handle: tauri::AppHandle,
-    book_path: String,
-) -> Result<Vec<u8>, String> {
-    db::get_thumbnail_bytes(app_handle, book_path)
-}
-
-#[tauri::command]
-fn update_book_info(
-    app_handle: tauri::AppHandle,
-    book_path: String,
-    new_name: String,
-    new_tags: Vec<String>,
-    new_description: Option<String>,
-    new_short_description: Option<String>,
-) -> Result<String, String> {
-    db::update_book_info(app_handle, book_path, new_name, new_tags, new_description, new_short_description)
-}
-
-#[tauri::command]
-fn export_database(app_handle: tauri::AppHandle, save_path: String) -> Result<String, String> {
-    db::export_database(app_handle, save_path)
-}
-
-#[tauri::command]
-fn import_database(app_handle: tauri::AppHandle, source_path: String) -> Result<String, String> {
-    db::import_database(app_handle, source_path)
-}
-
-// ===== AUTO BACKUP (an toàn trước "Update DB") =====
-#[tauri::command]
-fn check_auto_backup(app_handle: tauri::AppHandle) -> Result<Option<db::AutoBackupInfo>, String> {
-    db::check_auto_backup(app_handle)
-}
-
-#[tauri::command]
-fn restore_auto_backup(app_handle: tauri::AppHandle) -> Result<String, String> {
-    db::restore_auto_backup(app_handle)
-}
-
-#[tauri::command]
-fn discard_auto_backup(app_handle: tauri::AppHandle) -> Result<(), String> {
-    db::discard_auto_backup(app_handle)
-}
-
-#[tauri::command]
-fn update_database(app_handle: tauri::AppHandle) -> Result<String, String> {
-    scanner::perform_update_database(app_handle)
-}
-
-#[tauri::command]
-fn get_all_tags(app_handle: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    db::get_all_tags(app_handle)
-}
-
-// ===== THÙNG RÁC =====
-// Hai command này cho phép frontend ẩn/khôi phục sách
-// Không xóa file thật, chỉ đánh dấu hidden trong database
-
-// Ẩn sách → đưa vào thùng rác (hidden = true)
-#[tauri::command]
-fn hide_book(app_handle: tauri::AppHandle, book_path: String) -> Result<String, String> {
-    db::hide_book(app_handle, book_path)
-}
-
-// Khôi phục sách từ thùng rác về thư viện (hidden = false)
-#[tauri::command]
-fn restore_book(app_handle: tauri::AppHandle, book_path: String) -> Result<String, String> {
-    db::restore_book(app_handle, book_path)
-}
-
-// ===== FAVORITE / STAR =====
-// Toggle starred của 1 sách, trả về trạng thái mới (true/false)
-#[tauri::command]
-fn toggle_star(app_handle: tauri::AppHandle, book_path: String) -> Result<bool, String> {
-    db::toggle_star(app_handle, book_path)
-}
-
 // ===== OPEN LOCATION =====
 // Mở File Explorer và highlight sẵn file đó
 // Windows: explorer /select,"path\to\file.pdf"
@@ -134,139 +29,10 @@ fn reveal_in_explorer(file_path: String) -> Result<(), String> {
     Ok(())
 }
 
-// ===== TAG MANAGEMENT =====
-
-// Đổi tên tag trên toàn bộ sách có tag đó
-#[tauri::command]
-fn rename_tag(
-    app_handle: tauri::AppHandle,
-    old_name: String,
-    new_name: String,
-) -> Result<String, String> {
-    db::rename_tag(app_handle, old_name, new_name)
-}
-
-// Xóa tag khỏi toàn bộ sách có tag đó
-#[tauri::command]
-fn delete_tag(
-    app_handle: tauri::AppHandle,
-    tag_name: String,
-) -> Result<String, String> {
-    db::delete_tag(app_handle, tag_name)
-}
-
-// ===== AI AUTO-TAG =====
-
-// Lấy AI settings hiện tại
-#[tauri::command]
-fn get_ai_settings(app_handle: tauri::AppHandle) -> Result<ai_service::AiSettings, String> {
-    ai_service::get_ai_settings(app_handle)
-}
-
-// Lưu AI settings
-#[tauri::command]
-fn save_ai_settings(
-    app_handle: tauri::AppHandle,
-    settings: ai_service::AiSettings,
-) -> Result<String, String> {
-    ai_service::save_ai_settings(app_handle, settings)
-}
-
-// Suggest tags cho 1 batch sách — async vì gọi HTTP
-// Trả về Vec<AiTagSuggestion> để frontend hiện preview
-#[tauri::command]
-async fn suggest_tags_batch(
-    app_handle: tauri::AppHandle,
-    books: Vec<ai_service::BookToTag>,
-    options: ai_service::AiFillOptions,
-) -> Result<Vec<ai_service::AiTagSuggestion>, String> {
-    ai_service::suggest_tags_batch(app_handle, books, options).await
-}
-
-// Kiểm tra Ollama có đang chạy không
-#[tauri::command]
-async fn gemini_list_models(api_key: String) -> Result<Vec<ai_service::GeminiModel>, String> {
-    ai_service::list_gemini_models(&api_key).await
-}
-
-// ===== CHATGPT SIGN IN =====
-#[tauri::command]
-fn chatgpt_status(app_handle: tauri::AppHandle) -> Result<chatgpt_auth::ChatGptStatus, String> {
-    chatgpt_auth::status(&app_handle)
-}
-
-#[tauri::command]
-async fn chatgpt_sign_in(app_handle: tauri::AppHandle) -> Result<chatgpt_auth::ChatGptStatus, String> {
-    chatgpt_auth::sign_in(app_handle).await
-}
-
-#[tauri::command]
-fn chatgpt_cancel_sign_in() {
-    chatgpt_auth::cancel_sign_in()
-}
-
-#[tauri::command]
-fn chatgpt_sign_out(app_handle: tauri::AppHandle) -> Result<(), String> {
-    chatgpt_auth::sign_out(&app_handle)
-}
-
-#[tauri::command]
-async fn chatgpt_list_models(app_handle: tauri::AppHandle) -> Result<Vec<chatgpt_auth::ChatGptModel>, String> {
-    chatgpt_auth::list_models(&app_handle).await
-}
-
-#[tauri::command]
-async fn check_ollama(host: String) -> bool {
-    ai_service::check_ollama(&host).await
-}
-
-// ===== DUPLICATE DETECTION =====
-// Tính SHA1 nội dung file để tìm duplicate — chạy on-demand, không lưu vào DB
-// Emit progress event "duplicate_progress" để frontend hiện progress bar
-#[tauri::command]
-fn find_duplicates(app_handle: tauri::AppHandle) -> Result<Vec<db::DuplicateGroup>, String> {
-    db::find_duplicates(app_handle)
-}
-
-// ===== IN-APP READER =====
-
-#[tauri::command]
-fn get_pdf_page_count(app_handle: tauri::AppHandle, book_path: String) -> Result<u16, String> {
-    scanner::get_pdf_page_count(&app_handle, &book_path)
-}
-
 // Dung lượng file trên disk (bytes) — dùng cho summary panel
 #[tauri::command]
 fn get_file_size(file_path: String) -> Result<u64, String> {
     std::fs::metadata(&file_path).map(|m| m.len()).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn render_pdf_page(
-    app_handle: tauri::AppHandle,
-    book_path: String,
-    page_index: u16,
-    target_width: i32,
-) -> Result<Vec<u8>, String> {
-    scanner::render_pdf_page(&app_handle, &book_path, page_index, target_width)
-}
-
-#[tauri::command]
-fn get_page_cache_settings(app_handle: tauri::AppHandle) -> Result<page_cache::PageCacheSettings, String> {
-    page_cache::get_page_cache_settings(&app_handle)
-}
-
-#[tauri::command]
-fn save_page_cache_settings(
-    app_handle: tauri::AppHandle,
-    settings: page_cache::PageCacheSettings,
-) -> Result<String, String> {
-    page_cache::save_page_cache_settings(&app_handle, settings)
-}
-
-#[tauri::command]
-fn clear_page_cache(app_handle: tauri::AppHandle) -> Result<String, String> {
-    page_cache::clear_page_cache(&app_handle)
 }
 
 // WebView2 has its own native pinch-to-zoom (page-scale zoom) that's independent of
@@ -306,42 +72,41 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_library_folder,
-            get_library_folders,
-            remove_library_folder,
-            get_library_books,
-            get_thumbnail_bytes,
-            update_book_info,
-            export_database,
-            import_database,
-            check_auto_backup,
-            restore_auto_backup,
-            discard_auto_backup,
-            update_database,
-            get_all_tags,
-            hide_book,
-            restore_book,
             reveal_in_explorer,
-            toggle_star,
-            get_ai_settings,
-            save_ai_settings,
-            suggest_tags_batch,
-            check_ollama,
-            gemini_list_models,
-            chatgpt_status,
-            chatgpt_sign_in,
-            chatgpt_cancel_sign_in,
-            chatgpt_sign_out,
-            chatgpt_list_models,
-            rename_tag,
-            delete_tag,
-            find_duplicates,
-            get_pdf_page_count,
             get_file_size,
-            render_pdf_page,
-            get_page_cache_settings,
-            save_page_cache_settings,
-            clear_page_cache
+            db::add_library_folder,
+            db::get_library_folders,
+            db::remove_library_folder,
+            db::get_library_books,
+            db::update_book_info,
+            db::export_database,
+            db::import_database,
+            db::check_auto_backup,
+            db::restore_auto_backup,
+            db::discard_auto_backup,
+            db::get_all_tags,
+            db::hide_book,
+            db::restore_book,
+            db::toggle_star,
+            db::rename_tag,
+            db::delete_tag,
+            db::find_duplicates,
+            scanner::update_database,
+            scanner::get_pdf_page_count,
+            scanner::render_pdf_page,
+            ai_service::get_ai_settings,
+            ai_service::save_ai_settings,
+            ai_service::suggest_tags,
+            ai_service::check_ollama,
+            ai_service::gemini_list_models,
+            chatgpt_auth::chatgpt_status,
+            chatgpt_auth::chatgpt_sign_in,
+            chatgpt_auth::chatgpt_cancel_sign_in,
+            chatgpt_auth::chatgpt_sign_out,
+            chatgpt_auth::chatgpt_list_models,
+            page_cache::get_page_cache_settings,
+            page_cache::save_page_cache_settings,
+            page_cache::clear_page_cache
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

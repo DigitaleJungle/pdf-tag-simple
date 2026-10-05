@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { saveEntry, toggleBookmark, isBookmarked } from "./f_reading_history.js";
 import { openSummaryPanel, closeSummaryPanel, isSummaryPanelOpen, summaryBookPath, mountSummaryPanel } from "./f_summary.js";
+import { showMenu, bindMenuButton, overlayOpen } from "./ui.js";
 
 // =============================================
 // f_reader.js — In-app PDF reader
@@ -46,43 +47,19 @@ function wait(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// =============================================
-// Adjacent-book page cache — best-effort prefetch of the first couple pages
-// of the prev/next book so swiping/arrow-navigating there feels instant.
-// Deliberately low priority: kicked off after the current book's own pages
-// are underway, capped to a handful of books (FIFO) and a couple pages each
-// so it never competes seriously with loading the document actually on screen.
-// =============================================
+// Best-effort prefetch of the first couple pages of the prev/next book, so
+// page_cache.rs already has them on disk when the user swipes/arrows there.
+// Kicked off well after the current book's own pages are underway.
 const PREFETCH_PAGE_COUNT = 2;
-const MAX_CACHED_BOOKS = 6;
-const bookCache = new Map(); // path -> { pageCount, pages: Map(index -> bytes) }
-const prefetchInFlight = new Set();
-
-function cacheBook(path, entry) {
-    bookCache.set(path, entry);
-    while (bookCache.size > MAX_CACHED_BOOKS) {
-        const oldestPath = bookCache.keys().next().value;
-        if (oldestPath === path) break;
-        bookCache.delete(oldestPath);
-    }
-}
 
 async function prefetchBook(path) {
-    if (!path || bookCache.has(path) || prefetchInFlight.has(path)) return;
-    prefetchInFlight.add(path);
     try {
         const pageCount = await api.getPdfPageCount(path);
-        const entry = { pageCount, pages: new Map() };
-        cacheBook(path, entry);
-        const pagesToLoad = Math.min(PREFETCH_PAGE_COUNT, pageCount || 0);
-        for (let i = 0; i < pagesToLoad; i++) {
-            const bytes = await api.renderPdfPage(path, i, RENDER_WIDTH);
-            entry.pages.set(i, bytes);
+        for (let i = 0; i < Math.min(PREFETCH_PAGE_COUNT, pageCount); i++) {
+            await api.renderPdfPage(path, i, RENDER_WIDTH);
         }
     } catch (err) {
         console.error("Prefetch failed:", path, err);
-    } finally {
-        prefetchInFlight.delete(path);
     }
 }
 
@@ -517,17 +494,7 @@ export async function openReader(book, initialPage = null) {
     // the "contextmenu" listener below) — one menu, two ways to reach it,
     // rather than right-click showing a different/stale set of actions.
     function showReaderMenu(anchor) {
-        document.querySelectorAll(".reader-menu").forEach(m => m.remove());
-
-        const menu = document.createElement("div");
-        menu.className = "reader-menu";
-        menu.style.cssText = `
-            position: fixed; background: var(--panel); border: 1px solid var(--border);
-            border-radius: 8px; box-shadow: var(--shadow-md); padding: 4px;
-            z-index: 7000; min-width: 200px; font-size: 13px; color: var(--text);
-        `;
-
-        const items = [
+        showMenu([
             // Same gating as the toolbar's own bookmark button — bookmarking
             // only means anything for a session that's actually being
             // tracked (Read Mode "open-reader").
@@ -539,59 +506,25 @@ export async function openReader(book, initialPage = null) {
                     updateBookmarkBtn();
                 }
             }] : []),
-            {
-                label: "Open in default app",
-                action: async () => await window.__TAURI__.opener.openPath(currentBook.path)
-            },
-            {
-                label: "Open location",
-                action: async () => await api.revealInExplorer(currentBook.path)
-            },
+            { label: "Open in default app", action: () => window.__TAURI__.opener.openPath(currentBook.path) },
+            { label: "Open location", action: () => api.revealInExplorer(currentBook.path) },
             {
                 label: "Edit details",
-                action: () => {
-                    if (!window.__APP_ACTIONS__?.editBook) return;
-                    window.__APP_ACTIONS__.editBook(currentBook, (updated) => {
-                        if (!updated) return;
-                        currentBook.file_name = updated.file_name;
-                        currentBook.tags = updated.tags;
-                        title.innerText = currentBook.file_name;
-                        // A rename can move this book to a new spot in the
-                        // sorted grid order — re-check what first/prev/next/last
-                        // should now point at.
-                        updateNavButtons();
-                    });
-                }
+                action: () => window.__APP_ACTIONS__.editBook(currentBook, (updated) => {
+                    if (!updated) return;
+                    currentBook.file_name = updated.file_name;
+                    currentBook.tags = updated.tags;
+                    title.innerText = currentBook.file_name;
+                    // A rename can move this book to a new spot in the
+                    // sorted grid order — re-check what first/prev/next/last
+                    // should now point at.
+                    updateNavButtons();
+                }),
             },
-        ];
-
-        items.forEach(({ label, action }) => {
-            const item = document.createElement("div");
-            item.innerText = label;
-            item.style.cssText = "padding:9px 12px; cursor:pointer; border-radius:6px;";
-            item.onmouseenter = () => item.style.background = "var(--hover)";
-            item.onmouseleave = () => item.style.background = "transparent";
-            item.onclick = async () => { menu.remove(); await action(); };
-            menu.appendChild(item);
-        });
-
-        document.body.appendChild(menu);
-
-        const a = anchor || menuBtn.getBoundingClientRect();
-        menu.style.top = (a.bottom + 4) + "px";
-        menu.style.left = a.left + "px";
-        const rect = menu.getBoundingClientRect();
-        if (rect.right > window.innerWidth) menu.style.left = (a.right - rect.width) + "px";
-
-        setTimeout(() => {
-            document.addEventListener("click", () => menu.remove(), { once: true });
-        }, 0);
+        ], anchor);
     }
 
-    menuBtn.onclick = (e) => {
-        e.stopPropagation();
-        showReaderMenu();
-    };
+    bindMenuButton(menuBtn, () => showReaderMenu(menuBtn));
 
     // Right-click anywhere in the reader opens the same "more actions" menu
     // instead of the WebView's default context menu (Back/Reload/Inspect —
@@ -600,17 +533,14 @@ export async function openReader(book, initialPage = null) {
     overlay.addEventListener("contextmenu", (e) => {
         if (e.target.closest("input, textarea")) return;
         e.preventDefault();
-        showReaderMenu({ left: e.clientX, right: e.clientX, bottom: e.clientY });
+        showReaderMenu({ x: e.clientX, y: e.clientY });
     });
 
     async function loadPage(entry) {
         if (entry.loaded || entry.requested) return;
         entry.requested = true;
         try {
-            // A prefetch (triggered while the prev/next book was open) may already
-            // have this page's bytes cached — skip the round-trip if so.
-            const cached = bookCache.get(currentBook.path)?.pages.get(entry.index);
-            const bytes = cached ?? await api.renderPdfPage(currentBook.path, entry.index, RENDER_WIDTH);
+            const bytes = await api.renderPdfPage(currentBook.path, entry.index, RENDER_WIDTH);
             if (closed) return;
             if (bytes && bytes.length > 0) {
                 const blob = new Blob([new Uint8Array(bytes)], { type: "image/jpeg" });
@@ -711,11 +641,11 @@ export async function openReader(book, initialPage = null) {
     pageIndicator.onclick = enterPageJumpMode;
 
     function onKeydown(e) {
-        // "Edit name & Tags" opens its own overlay on top of the reader, and
-        // the page-jump box is an inline input — don't let reader shortcuts
-        // (Escape, zoom, prev/next) steal keystrokes meant for either
-        // (e.g. typing "-" into the file name, or a page number).
-        if (document.querySelector(".edit-book-overlay")) return;
+        // Modals / menus open on top of the reader, and the page-jump box is
+        // an inline input — don't let reader shortcuts (Escape, zoom,
+        // prev/next) steal keystrokes meant for either (e.g. typing "-" into
+        // the file name, or a page number).
+        if (overlayOpen()) return;
         if (document.activeElement?.tagName === "INPUT") return;
 
         if (e.key === "Escape") {
@@ -746,10 +676,10 @@ export async function openReader(book, initialPage = null) {
     }
 
     // Mouse "back" side button (button 3) — same guard as onKeydown so it
-    // doesn't close the reader out from under an open "Edit name & Tags" modal.
+    // doesn't close the reader out from under an open modal.
     function onMouseUp(e) {
         if (e.button !== 3) return;
-        if (document.querySelector(".edit-book-overlay")) return;
+        if (overlayOpen()) return;
         e.preventDefault();
         close();
     }

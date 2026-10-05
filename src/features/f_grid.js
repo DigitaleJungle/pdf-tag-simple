@@ -1,6 +1,7 @@
 import { createCard } from "./ui_grid_card.js";
 import { showCardContextMenu, openEditModal, openBulkTagModal } from "./ui_grid_menu.js";
 import { openReader } from "./f_reader.js";
+import { isInFolder } from "./ui.js";
 
 // =============================================
 // GRID STATE — giữ trạng thái giữa các batch
@@ -137,13 +138,9 @@ export function getFilteredPaths() {
 function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly) {
     let result = books;
 
-    // 1. Filter theo folder
-    if (filterPath && filterPath !== "All Documents") {
-        result = result.filter(b => {
-            const normalizedBook = b.path.replace(/\\/g, "/");
-            const normalizedFolder = filterPath.replace(/\\/g, "/").replace(/\/+$/, "");
-            return normalizedBook.startsWith(normalizedFolder + "/");
-        });
+    // 1. Filter theo folder (null = All Documents)
+    if (filterPath) {
+        result = result.filter(b => isInFolder(b.path, filterPath));
     }
 
     // 2. Filter theo search
@@ -161,51 +158,31 @@ function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnl
         result = result.filter(b => !b.tags || b.tags.length === 0);
     } else if (selectedTags && selectedTags.length > 0) {
         result = result.filter(b => {
-            if (!b.tags || b.tags.length === 0) return false;
-            return selectedTags.every(st =>
-                b.tags.map(t => t.toLowerCase()).includes(st.toLowerCase())
-            );
+            const tags = (b.tags || []).map(t => t.toLowerCase());
+            return selectedTags.every(st => tags.includes(st.toLowerCase()));
         });
     }
 
-    // 4. Sort — starred LUÔN lên đầu bất chấp sort kiểu gì
-    if (sort === "name-desc") {
-        result = [...result].sort((a, b) => {
-            if (a.starred && !b.starred) return -1;
-            if (!a.starred && b.starred) return 1;
-            return b.file_name.toLowerCase().localeCompare(a.file_name.toLowerCase());
-        });
-    } else if (sort === "date-desc") {
-        result = [...result].sort((a, b) => {
-            if (a.starred && !b.starred) return -1;
-            if (!a.starred && b.starred) return 1;
-            return (b.date_added || 0) - (a.date_added || 0);
-        });
-    } else if (sort === "date-asc") {
-        result = [...result].sort((a, b) => {
-            if (a.starred && !b.starred) return -1;
-            if (!a.starred && b.starred) return 1;
-            return (a.date_added || 0) - (b.date_added || 0);
-        });
-    } else if (sort === "missing-short" || sort === "missing-long") {
-        // Ngoại lệ của quy tắc starred: sách thiếu description lên đầu trước, rồi mới tới starred,
-        // để sách có starred mà đã có description không chen lên trên những sách cần điền
-        const field = sort === "missing-short" ? "short_description" : "description";
-        const isEmpty = (book) => !(book[field] || "").trim();
-        result = [...result].sort((a, b) => {
-            if (isEmpty(a) !== isEmpty(b)) return isEmpty(a) ? -1 : 1;
-            if (a.starred && !b.starred) return -1;
-            if (!a.starred && b.starred) return 1;
-            return a.file_name.toLowerCase().localeCompare(b.file_name.toLowerCase());
-        });
-    } else {
-        // name-asc (mặc định)
-        result = [...result].sort((a, b) => {
-            if (a.starred && !b.starred) return -1;
-            if (!a.starred && b.starred) return 1;
-            return a.file_name.toLowerCase().localeCompare(b.file_name.toLowerCase());
-        });
-    }
-
-    return result;
+    // 4. Sort — starred LUÔN lên đầu bất chấp sort kiểu gì.
+    // Ngoại lệ "missing-*": sách thiếu description lên đầu trước, rồi mới tới starred,
+    // để sách có starred mà đã có description không chen lên trên những sách cần điền
+    const byName = (a, b) => a.file_name.toLowerCase().localeCompare(b.file_name.toLowerCase());
+    const missing = (field) => (a, b) => !(a[field] || "").trim() - !(b[field] || "").trim();
+    const comparators = {
+        "name-desc": (a, b) => byName(b, a),
+        "date-desc": (a, b) => (b.date_added || 0) - (a.date_added || 0),
+        "date-asc": (a, b) => (a.date_added || 0) - (b.date_added || 0),
+    };
+    const starredFirst = (a, b) => !!b.starred - !!a.starred;
+    const descField = { "missing-short": "short_description", "missing-long": "description" }[sort];
+    const chain = descField
+        ? [(a, b) => -missing(descField)(a, b), starredFirst, byName]
+        : [starredFirst, comparators[sort] || byName];
+    return [...result].sort((a, b) => {
+        for (const cmp of chain) {
+            const d = cmp(a, b);
+            if (d) return d;
+        }
+        return 0;
+    });
 }

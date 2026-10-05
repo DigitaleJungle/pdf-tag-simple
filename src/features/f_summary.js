@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { addCover, overlayOpen } from "./ui.js";
 
 // =============================================
 // f_summary.js — Summary panel bên phải (Behaviour = "Summary view")
@@ -24,7 +25,6 @@ import { api } from "./api.js";
 
 let currentBook = null;
 let currentActions = null;
-let thumbUrl = null;
 // Số trang / dung lượng theo path — khỏi hỏi lại backend mỗi lần render
 const fileInfoCache = new Map();
 
@@ -83,7 +83,6 @@ export function closeSummaryPanel() {
     const panel = panelEl();
     currentBook = null;
     currentActions = null;
-    if (thumbUrl) { URL.revokeObjectURL(thumbUrl); thumbUrl = null; }
     if (panel) {
         panel.classList.remove("open");
         panel.style.width = "";
@@ -106,7 +105,7 @@ export function refreshSummaryPanel(books) {
 // Esc đóng panel (trừ khi đang có modal / reader mở phía trên)
 document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || !currentBook) return;
-    if (document.querySelector(".edit-book-overlay, .ai-autotag-overlay, .pdf-reader-overlay, .settings-overlay, .duplicates-overlay, .rename-tag-overlay, .auto-backup-overlay")) return;
+    if (overlayOpen() || document.querySelector(".pdf-reader-overlay")) return;
     closeSummaryPanel();
 });
 
@@ -169,7 +168,7 @@ function render(reloadThumb) {
         cover = document.createElement("div");
         cover.className = "summary-cover";
         cover.innerText = "📕";
-        loadCover(cover, book.path);
+        addCover(cover, book.thumbnail_path);
     }
     body.appendChild(cover);
 
@@ -190,7 +189,6 @@ function render(reloadThumb) {
             book.starred = newState;
             star.style.opacity = newState ? "1" : "0.3";
             star.title = newState ? "Unstar" : "Star";
-            window.__APP_ACTIONS__?.onStarToggled?.(book.path, newState);
             currentActions?.onStarChanged?.();
         } catch (err) {
             console.error("Toggle star fail:", err);
@@ -315,22 +313,6 @@ function makeResizer(panel) {
         try { localStorage.setItem("summaryPanelWidth", String(DEFAULT_PANEL_WIDTH)); } catch { /* ignore */ }
     });
     return handle;
-}
-
-async function loadCover(cover, path) {
-    try {
-        const bytes = await api.getThumbnail(path);
-        // Panel có thể đã chuyển sang sách khác trong lúc chờ
-        if (!bytes || bytes.length === 0 || currentBook?.path !== path) return;
-        if (thumbUrl) URL.revokeObjectURL(thumbUrl);
-        thumbUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }));
-        const img = document.createElement("img");
-        img.src = thumbUrl;
-        cover.innerHTML = "";
-        cover.appendChild(img);
-    } catch (err) {
-        console.error("Load summary cover fail:", err);
-    }
 }
 
 function sectionLabel(text) {

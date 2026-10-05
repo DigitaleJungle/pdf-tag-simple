@@ -36,6 +36,11 @@
           </div>
           <!-- Status — ghi bởi main.js → setStatus() -->
           <div id="txt-status" class="status-text">Ready.</div>
+          <!-- Thanh tiến trình render thumbnail — main.js lắng nghe "scan_progress" -->
+          <div id="scan-progress" hidden style="margin-top:6px;">
+            <progress max="1" value="0"></progress>
+            <div class="hint"></div>
+          </div>
         </div>
 
         <!-- Toolbar buttons — sự kiện gắn trong main.js -->
