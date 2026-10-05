@@ -50,6 +50,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const btnThemeToggle      = document.querySelector("#btn-theme-toggle");
     const btnToggleSidebar    = document.querySelector("#btn-toggle-sidebar");
     const btnCardSizeToggle   = document.querySelector("#btn-card-size-toggle");
+    const btnBehaviour        = document.querySelector("#btn-behaviour");
 
     // Selection + trash buttons
     const btnTrashView        = document.querySelector("#btn-trash-view");
@@ -503,9 +504,69 @@ window.addEventListener("DOMContentLoaded", async () => {
         state.clickBehavior = value;
         localStorage.setItem("clickBehavior", value);
         if (value !== "summary") closeSummaryPanel();
+        updateBehaviourButton();
         updateSelectionUI();
         updateGrid();
     }
+
+    // Nút Behaviour trên toolbar: hiện chế độ hiện tại, click mở menu chọn 1 trong 4
+    const BEHAVIOUR_CHOICES = [
+        { value: "select", label: "Manage", hint: "Click selects; double-click edits" },
+        { value: "open-default", label: "Read: default app", hint: "Click opens in your PDF viewer" },
+        { value: "open-reader", label: "Read: in-app", hint: "Click opens in the built-in reader" },
+        { value: "summary", label: "Summary", hint: "Click shows details on the right" },
+    ];
+    function updateBehaviourButton() {
+        if (!btnBehaviour) return;
+        const current = BEHAVIOUR_CHOICES.find(c => c.value === state.clickBehavior) || BEHAVIOUR_CHOICES[0];
+        btnBehaviour.innerText = `${current.label} ▾`;
+        btnBehaviour.title = `Behaviour: ${current.label} — ${current.hint}`;
+    }
+    function closeBehaviourMenu() {
+        document.querySelectorAll(".behaviour-menu").forEach(el => el.remove());
+        document.removeEventListener("mousedown", onBehaviourOutside, true);
+        document.removeEventListener("keydown", onBehaviourEscape, true);
+    }
+    function onBehaviourOutside(e) {
+        if (!e.target.closest(".behaviour-menu") && e.target !== btnBehaviour) closeBehaviourMenu();
+    }
+    function onBehaviourEscape(e) {
+        if (e.key === "Escape") { e.stopPropagation(); closeBehaviourMenu(); }
+    }
+    function openBehaviourMenu() {
+        closeBehaviourMenu();
+        const rect = btnBehaviour.getBoundingClientRect();
+        const menu = document.createElement("div");
+        menu.className = "behaviour-menu";
+        menu.style.cssText = `position:fixed; top:${rect.bottom + 4}px; right:${Math.max(8, window.innerWidth - rect.right)}px;
+            background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow-md);
+            padding:4px; z-index:1000; min-width:230px; font-size:13px; color:var(--text);`;
+        BEHAVIOUR_CHOICES.forEach(choice => {
+            const item = document.createElement("div");
+            const selected = choice.value === state.clickBehavior;
+            item.style.cssText = "display:flex; gap:8px; padding:8px 10px; border-radius:6px; cursor:pointer;";
+            item.innerHTML = `<span style="width:14px; color:var(--primary);">${selected ? "✓" : ""}</span>
+                <span><div style="font-weight:${selected ? 600 : 500};">${choice.label}</div>
+                <div style="font-size:11px; color:var(--text-secondary);">${choice.hint}</div></span>`;
+            item.onmouseenter = () => item.style.background = "var(--hover)";
+            item.onmouseleave = () => item.style.background = "transparent";
+            item.onclick = () => {
+                closeBehaviourMenu();
+                if (choice.value !== state.clickBehavior) setClickBehavior(choice.value);
+            };
+            menu.appendChild(item);
+        });
+        document.body.appendChild(menu);
+        document.addEventListener("mousedown", onBehaviourOutside, true);
+        document.addEventListener("keydown", onBehaviourEscape, true);
+    }
+    if (btnBehaviour) {
+        btnBehaviour.addEventListener("click", () => {
+            if (document.querySelector(".behaviour-menu")) closeBehaviourMenu();
+            else openBehaviourMenu();
+        });
+    }
+    updateBehaviourButton();
 
     // ==========================================
     // CARD NHỎ / CARD LỚN — dùng chung cho Settings ("Show short description") và nút trên toolbar
