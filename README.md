@@ -68,7 +68,7 @@ The **AI method** sets what the AI gets for each book:
 - Filename + all pages (as images)
 - Filename + PDF file (OpenAI, ChatGPT and Gemini only, up to 30 MB)
 
-Other options: maximum tags per book, skip books that already have enough tags, output language, extra instructions (which you can save as named prompts), and "apply results immediately". Otherwise you review and edit the results before applying them. Several books run in parallel, and progress updates live.
+Other options: maximum tags per book, skip books that already have enough tags, output language, a tag vocabulary of preferred tags, extra instructions (which you can save as named prompts), and "apply results immediately". The AI method, extra instructions and tag vocabulary can be changed for a single run under **Advanced** in the AI auto window. Otherwise you review and edit the results before applying them. Several books run in parallel, and progress updates live.
 
 ### Backup
 *Settings → Backup* exports and imports the whole tag/description database as JSON.

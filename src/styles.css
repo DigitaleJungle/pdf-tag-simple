@@ -699,6 +699,10 @@ textarea.field { resize: vertical; }
 .menu-item.danger:hover { background: var(--danger-soft); }
 
 /* Chips (tag editor) */
+/* Fieldset chỉ để nhóm + disable cả khối (vd. tag vocabulary trong AI auto) */
+.plain-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.plain-fieldset:disabled { opacity: 0.5; }
+
 .chip-editor {
   border: 1px solid var(--border);
   border-radius: 10px;

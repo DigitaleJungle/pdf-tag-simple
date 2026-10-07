@@ -551,6 +551,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
             fill[key] = box.checked;
             savePref("aiFillOptions", fill);
             updateCostEstimate();
+            if (key === "tags") { updateVocabEnabled(); updateMoreSummary(); }
         });
         fillBlock.appendChild(row);
         return box;
@@ -654,6 +655,26 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     promptNameInput.value = pickedPrompt()?.name || "";
     updatePromptSaveBtn();
 
+    // --- Tag vocabulary cho lần chạy này --- (mặc định theo AI Settings, không lưu lại)
+    // <fieldset disabled> làm mờ + khóa cả ô nhập lẫn nút x khi không chọn "Tags"
+    const settingsVocab = settings.tag_vocabulary || [];
+    const runVocab = [...settingsVocab];
+    const vocabChanged = () => runVocab.length !== settingsVocab.length || runVocab.some((t, i) => t !== settingsVocab[i]);
+    const vocabEditor = createTagEditor(runVocab, { placeholder: "Add tag and press Enter...", onChange: () => updateMoreSummary() });
+    const vocabResetBtn = button("Reset to AI Settings", "small", () => {
+        runVocab.splice(0, runVocab.length, ...settingsVocab);
+        vocabEditor.render();
+    });
+    const vocabBlock = el("fieldset", "plain-fieldset");
+    vocabBlock.append(
+        label("Tag vocabulary (optional)"), vocabEditor.wrap,
+        hint("Preferred tags for this run, from AI Settings. Changes here aren't saved. Leave empty for free tagging."),
+        vocabResetBtn,
+    );
+    vocabResetBtn.style.alignSelf = "flex-start";
+    const updateVocabEnabled = () => { vocabBlock.disabled = !fill.tags; };
+    updateVocabEnabled();
+
     // Giải thích, gom ở cuối "Advanced"
     const helpBlock = el("div");
     helpBlock.style.cssText = "display:flex; flex-direction:column; gap:4px; border-top:1px solid var(--border); padding-top:8px;";
@@ -665,6 +686,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         label("AI Method"), runInputSelect,
         label("Extra instructions (optional)"), promptSelect, promptText, promptSaveRow,
         hint("Your last instructions are remembered. Save them under a prompt name to reuse them; same name = update. Delete prompts in AI Settings."),
+        vocabBlock,
         helpBlock,
     );
 
@@ -676,6 +698,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
             const picked = pickedPrompt();
             active.push(`instructions: ${picked && picked.text.trim() === instructions ? picked.name : "custom"}`);
         }
+        if (fill.tags && vocabChanged()) active.push("vocabulary: custom");
         moreSummary.innerText = `Advanced · ${active.join(" · ")}`;
     }
     updateMoreSummary();
@@ -750,7 +773,10 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         body,
         footer,
         // Nếu đã lưu gì thì refresh grid để thấy tags/description mới
-        onClose: () => { if (appliedCount > 0) onApplied(); },
+        onClose: () => {
+            vocabEditor.destroy();
+            if (appliedCount > 0) onApplied();
+        },
     });
     const cancelBtn = button("Cancel", "", close);
     footer.append(footerLeft, cancelBtn, startBtn, applyBtn);
@@ -771,16 +797,21 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
             return;
         }
 
-        [startBtn, scopeSelect, ...fillCheckboxes, immediate.box, promptSelect, promptText, promptNameInput, promptSaveBtn, runInputSelect]
+        vocabEditor.flush();
+        [startBtn, scopeSelect, ...fillCheckboxes, immediate.box, promptSelect, promptText, promptNameInput, promptSaveBtn, runInputSelect, vocabBlock]
             .forEach(c => { c.disabled = true; });
         const saveAsTheyArrive = immediate.box.checked;
-        const runOptions = { ...fill, extra_prompt: promptText.value.trim(), input_mode: runInputSelect.value };
+        const runOptions = {
+            ...fill, extra_prompt: promptText.value.trim(), input_mode: runInputSelect.value,
+            tag_vocabulary: [...runVocab],
+        };
 
         // Thu gọn lựa chọn thành 1 dòng để kết quả có chỗ
         const filled = [["tags", "Tags"], ["short_description", "Short description"], ["description", "Long description"]]
             .filter(([key]) => runOptions[key]).map(([, text]) => text).join(", ");
         const summaryParts = [`${eligible.length} book${eligible.length === 1 ? "" : "s"}`, filled, inputModeLabel(runOptions.input_mode)];
         if (runOptions.extra_prompt) summaryParts.push("with extra instructions");
+        if (fill.tags && vocabChanged()) summaryParts.push("custom vocabulary");
         if (saveAsTheyArrive) summaryParts.push("saving immediately");
         runSummary.innerText = summaryParts.join(" · ");
         runSummary.title = runOptions.extra_prompt ? `Extra instructions: ${runOptions.extra_prompt}` : "";

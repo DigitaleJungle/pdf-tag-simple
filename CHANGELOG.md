@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0] - 2026-10-07
+
+### Added
+- AI auto: change the tag vocabulary for a single run under **Advanced**. It starts from the vocabulary in AI Settings, changes aren't saved, and **Reset to AI Settings** puts it back. The field is greyed out when Tags isn't being filled in.
+
 ## [1.1.0] - 2026-10-07
 
 ### Added

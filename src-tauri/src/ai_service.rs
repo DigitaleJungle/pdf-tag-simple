@@ -150,6 +150,9 @@ pub struct AiFillOptions {
     // Input mode cho lần chạy này (chọn trong modal) — rỗng = dùng input_mode trong AI Settings
     #[serde(default)]
     pub input_mode: String,
+    // Tag vocabulary cho lần chạy này (sửa trong modal) — None = dùng tag_vocabulary trong AI Settings
+    #[serde(default)]
+    pub tag_vocabulary: Option<Vec<String>>,
 }
 
 fn default_true() -> bool { true }
@@ -1108,7 +1111,7 @@ pub async fn suggest_tags(
 
     let prompt = build_prompt(
         &book.file_name,
-        &settings.tag_vocabulary,
+        options.tag_vocabulary.as_ref().unwrap_or(&settings.tag_vocabulary),
         &settings.tag_language,
         settings.max_tags,
         &source_note,

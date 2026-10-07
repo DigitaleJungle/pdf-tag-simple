@@ -126,7 +126,7 @@ export async function openBulkTagModal(paths, onSave) {
 // TAG EDITOR — chips + ô nhập + dropdown gợi ý từ allTagNames (tags có sẵn trong thư viện)
 // tagList được sửa trực tiếp (push/splice)
 // =============================================
-export function createTagEditor(tagList, { allTagNames = [], onEnter = null, remove = false, placeholder = "Type a tag and press Enter..." } = {}) {
+export function createTagEditor(tagList, { allTagNames = [], onEnter = null, onChange = null, remove = false, placeholder = "Type a tag and press Enter..." } = {}) {
     const wrap = el("div", remove ? "chip-editor remove" : "chip-editor");
     const tagInput = el("input");
     tagInput.type = "text";
@@ -192,6 +192,7 @@ export function createTagEditor(tagList, { allTagNames = [], onEnter = null, rem
         });
         wrap.appendChild(tagInput);
         if (focusInput) tagInput.focus();
+        onChange?.();
     }
 
     function addTag(raw) {
@@ -251,6 +252,8 @@ export function createTagEditor(tagList, { allTagNames = [], onEnter = null, rem
     return {
         wrap,
         flush: () => { if (tagInput.value.trim()) addTag(tagInput.value); },
+        // Vẽ lại sau khi tagList bị thay từ bên ngoài
+        render: () => renderChips(false),
         // Dropdown sống ở <body>, không phải con của wrap — phải gỡ khi modal đóng
         tags: tagList,
         destroy: () => dropdown.remove(),
