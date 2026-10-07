@@ -115,7 +115,9 @@ npm run dev            # development build, uses its own data folder (com.menco.
 npm run tauri build    # release build
 ```
 
-`npm run dev` merges `src-tauri/tauri.dev.conf.json`, so a dev session never touches your real library.
+`npm run dev` merges `src-tauri/tauri.dev.conf.json`, so a dev session never touches your real library. The dev build is titled "PDF Tag Simple (Dev)" and has an orange-band icon, so you can tell it apart from the installed app.
+
+The app icon is generated from `app-icon.svg` (`npx tauri icon app-icon.svg`); the dev icon set in `src-tauri/icons/dev/` comes from `app-icon-dev.svg`.
 
 ### Project layout
 

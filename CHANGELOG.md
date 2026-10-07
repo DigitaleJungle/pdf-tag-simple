@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.1] - 2026-10-07
+
+### Changed
+- New flat app icon that stays sharp at small sizes, like in the taskbar, title bar and Start menu.
+
 ## [1.2.0] - 2026-10-07
 
 ### Added
