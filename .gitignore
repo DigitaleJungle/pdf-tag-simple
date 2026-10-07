@@ -25,3 +25,4 @@ dist-ssr
 
 # Tauri build output (very large, don't commit)
 src-tauri/target/
+.claude/skills/release/SKILL.md
