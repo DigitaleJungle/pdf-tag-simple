@@ -1,100 +1,136 @@
 # PDF Tag Simple
-<img width="822" height="487" alt="Image" src="https://github.com/user-attachments/assets/8ae4f8b1-55fd-4be6-b14b-88670310449d" />
 
-I have too many PDFs. All sitting on a HDD.
+A fast desktop app for browsing, tagging, describing and reading a large PDF library. You scan your folders once, and after that browsing runs from a local cache, so even a library on a slow HDD feels instant.
 
-You know the feeling — open a folder with a few thousand files and wait a full minute just for Explorer to finish loading. Then you still can't find what you're looking for.
+Built with [Tauri 2](https://tauri.app/) (Rust backend, plain HTML/JS frontend) and [PDFium](https://pdfium.googlesource.com/pdfium/) for rendering.
 
-So I built this.
-
-## Getting started
-
-1. Click **Add Path** — select your PDF folder
-2. Click **Update DB** — scans the folder and renders thumbnails (first time is slow, see benchmarks below)
-3. Done — browse, search, and tag
-
-Every time you add new files to the folder, click **Update DB** again to pick them up.
-
----
-
-
-
-**Scan once. Browse forever.**
-
-The app scans your PDF folder, then stores all metadata and thumbnails on your SSD. After that, browsing is instant — because you're reading from SSD cache, not spinning up the HDD every time.
-
-For small libraries (a few hundred files) the first scan is quick. For large ones it takes longer — mostly because rendering thumbnails for that many PDFs is just slow. Rough benchmarks on a HDD:
-
-| Files | Time |
-|-------|------|
-| ~500  | ~1 min |
-| ~3000 | ~4 min |
-| ~10000 | ~14 min |
-
-If the app seems frozen during a large scan: it's probably still working in the background. Check `%AppData%\com.menco.pdftag\cache` — if files are appearing there, it's still running. Just leave it.
-
-Once it's done, you can filter by tags, search by name, and browse everything at a speed that feels almost unreasonable for a HDD library.
-
-## Features
-
-- **One-time scan** — slow once, instant forever
-- **AI Auto-Tag** — reads your filenames (and optionally cover thumbnails) and suggests tags automatically. Works with OpenAI or a local Ollama model.
-- **Tag filter** — click any tag to filter instantly
-- **Thumbnail grid** — actually see your files instead of just filenames
-- **Search** — real-time search by filename
-- **Star files** — mark favorites
-- **Duplicate finder** — works, but it's basic. If you have serious duplicates, use a dedicated duplicate finder app instead. This one is just "good enough."
-- **Import / Export** — backup your tag database
-
-## What it doesn't do
-
-- No subfolder tree — the app scans one folder at a time, no recursive subfolder adding
-- No cloud sync
-- Nothing fancy
-
-That's fine. It does what I need.
+> **Fork notice.** This is a fork of [mencolovepizza/pdf-tag-simple](https://github.com/mencolovepizza/pdf-tag-simple) by [@mencolovepizza](https://github.com/mencolovepizza). Thanks for the original idea and codebase: scan once, browse forever. This fork adds a built-in reader, descriptions, a summary panel, more AI providers and a lot of UI work. It is developed separately from upstream.
 
 ## Download
 
-Grab the latest release from the [Releases](../../releases) page.
+Get the latest Windows installer (`.msi` or `.exe`) from the [Releases](https://github.com/DigitaleJungle/pdf-tag-simple/releases) page. The installers aren't code-signed, so Windows SmartScreen may show a warning the first time you run one. Click **More info → Run anyway**.
 
-Extract the zip and run `pdf-tag.exe`. Keep the `.dll` files in the same folder — the app needs them to render PDF thumbnails.
+## Getting started
 
-Built with Tauri, so it's fast and light.
+1. Open **Settings** (gear icon, bottom left) and click **Add Path** to add a PDF folder. You can add several. Subfolders are scanned too.
+2. Click **Update DB**. It scans the folders and renders a cover thumbnail for each PDF. The first run is slow on large libraries; later runs only pick up changes.
+3. Browse, search, tag and read.
 
-## AI Auto-Tag
+Click **Update DB** again whenever files are added, moved or removed. Before each update the app makes an automatic backup of your tags and descriptions. If something looks wrong afterwards, it offers to restore it.
 
-Supports two providers:
+## Features
 
-**OpenAI** — needs an API key. Go to AI Settings, paste your key, done. Get one at [platform.openai.com](https://platform.openai.com/).
+### Library
+- **Thumbnail grid** with small or large cards. Large cards also show the short description.
+- **Folders sidebar**: filter by library folder. The sidebar can be collapsed (`Ctrl + B`).
+- **Tag filter**: click tags to filter. Tags can be searched, renamed and deleted, and you can filter on untagged books.
+- **Search** across file name, tags, short description and description.
+- **Sort** by name, date added, or missing short/long description first.
+- **Star** favourites.
+- **Hide / Trash**: hide books from the library and restore them from the Trash view.
+- **Find duplicates**: a basic duplicate finder.
+- **Edit details**: name, tags, short description and long description, for one book or for a selection (bulk tag editing).
 
-**Ollama** — runs locally, no API key needed. Install [Ollama](https://ollama.com/), pull a model, point the app at `http://localhost:11434`.
+### Behaviour modes
+Use the toolbar button or *Settings → General* to choose what a click does:
+
+| Mode | Click | Double click |
+|------|-------|--------------|
+| Manage | Select | Edit details |
+| Read: default app | Open in your PDF viewer | |
+| Read: in-app | Open in the built-in reader | |
+| Summary | Show details in the right-hand panel | Open the reader |
+
+The **summary panel** shows the cover, star, tags, descriptions, date added, path, page count and file size, with buttons for Read, Open in default app, Edit details, Show in folder and AI auto. The panel can be resized, and it can also be opened inside the reader.
+
+### Built-in reader
+- Zoom with the mouse wheel, keyboard or pinch, and swipe between books on touch screens.
+- **Continue reading**: remembers the book, page and filters you had, plus your last 3 books. You can bookmark a session so it is kept.
+- Rendered pages are cached on disk (size limit configurable under *Settings → General*).
+
+### AI auto
+Fills in **tags**, a **short description** and/or a **long description** for all books, the current folder, a selection, or a single book.
+
+Providers (set in *Settings → AI Settings*):
+
+| Provider | Notes |
+|----------|-------|
+| OpenAI (API key) | Get a key at [platform.openai.com](https://platform.openai.com/) |
+| Gemini (API key) | Get a key at [aistudio.google.com](https://aistudio.google.com/) |
+| Gemini (free tier) | Rate-limited (one request about every 6.5 s). Google may use free-tier data. |
+| ChatGPT (beta) | Sign in with your ChatGPT plan. No API key needed. |
+| Ollama (local) | Install [Ollama](https://ollama.com/), pull a model and point the app at `http://localhost:11434` |
+
+The **AI method** sets what the AI gets for each book:
+- Filename only
+- Filename + PDF text (the text layer, fast, works with every provider)
+- Filename + cover image
+- Filename + all pages (as images)
+- Filename + PDF file (OpenAI, ChatGPT and Gemini only, up to 30 MB)
+
+Other options: maximum tags per book, skip books that already have enough tags, output language, extra instructions (which you can save as named prompts), and "apply results immediately". Otherwise you review and edit the results before applying them. Several books run in parallel, and progress updates live.
+
+### Backup
+*Settings → Backup* exports and imports the whole tag/description database as JSON.
 
 ## Keyboard shortcuts
 
+**Library**
+
 | Key | Action |
 |-----|--------|
-| `Ctrl + A` | Select all visible (respects current folder / search / tag filter) |
-| `Ctrl + F` | Focus search box |
-| `Esc` | Clear selection |
-| `Shift + Click` | Select range |
-| `Double click` | Open PDF |
+| `Ctrl + A` | Select all visible books (follows the current folder, search and tag filter) |
+| `Ctrl + F` | Focus the search box |
+| `Ctrl + B` | Show or hide the sidebar |
+| `Esc` | Clear the selection |
+| `Shift + Click` | Select a range |
 
-## Source code
+**Reader**
 
-It's here on this GitHub. Not the cleanest code — built for me, shared in case it's useful for you.
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Previous / next book |
+| `+` / `-` | Zoom in / out |
+| `Ctrl + Wheel` | Zoom |
+| `Esc` | Close the reader |
 
-## Buy meow a pizza 🍕
+## Where data is stored
 
-If this saved you some time, crypto tips are appreciated:
+Everything is stored in the app data folder, `%AppData%\com.menco.pdftag\` on Windows:
 
-| Chain | Address |
-|-------|---------|
-| Bitcoin | `bc1qq22t5n273qxd9m4x6hhfalpffxhfhce5zy5vw7` |
-| BNB | `0x93C9E2C8c40E23ebc09DB2a620a673E6024AaEed` |
-| TON | `EQAVuIKvQvjY6_bRoCDrWvYygFmI0yP8wVfAUBBR6y2ZIIXm` |
-| SOL | `8CqbAtwK22iQjSh9ZE7BVB9wLDwwVu1kQDBA42omcjeo` |
+- `database.json`: library folders
+- `library_books.json`: books, tags, stars and descriptions
+- `cache\`: cover thumbnails and the reader's page cache
+- `auto_backup_before_update.json`: backup made before each Update DB
 
----
+Your PDFs are never modified.
 
-Built by [@mencolovepizza](https://github.com/mencolovepizza)
+## Building from source
+
+Requirements: [Node.js](https://nodejs.org/), [Rust](https://rustup.rs/) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/). `pdfium.dll` must be in `src-tauri/` (it is bundled with the app).
+
+```sh
+npm install
+npm run dev            # development build, uses its own data folder (com.menco.pdftag.dev)
+npm run tauri build    # release build
+```
+
+`npm run dev` merges `src-tauri/tauri.dev.conf.json`, so a dev session never touches your real library.
+
+### Project layout
+
+```
+src/                 frontend (no framework, no bundler)
+  main.js            app wiring, toolbar, filters, shortcuts
+  features/          one file per feature (grid, reader, summary, AI, settings, ...)
+src-tauri/src/
+  db.rs              folders, books, tags, backup/import/export
+  scanner.rs         folder scan + thumbnail rendering
+  page_cache.rs      reader page rendering and disk cache
+  ai_service.rs      AI providers and prompts
+  chatgpt_auth.rs    "Sign in with ChatGPT" OAuth flow
+```
+
+## Credits
+
+The original app was created by [@mencolovepizza](https://github.com/mencolovepizza) ([original repository](https://github.com/mencolovepizza/pdf-tag-simple)). If the original saved you time, consider supporting them through the tip addresses in the upstream README.
