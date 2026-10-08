@@ -154,7 +154,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     };
 
     function openAi(selected) {
-        openAiAutoTag(state.books.filter(b => !b.hidden), selected, state.currentFilterPath, () => refreshUi());
+        openAiAutoTag(state.books.filter(b => !b.hidden), selected, state.currentFilterPath, () => refreshUi(), async (failed) => {
+            // Chọn sẵn các sách lỗi trên grid, rồi mở lại AI auto với đúng những sách đó
+            state.selectedBooks.clear();
+            failed.forEach(p => state.selectedBooks.add(p));
+            await refreshUi();
+            openAi(state.selectedBooks);
+        });
     }
 
     // ==========================================

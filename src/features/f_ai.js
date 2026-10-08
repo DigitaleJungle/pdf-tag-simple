@@ -496,8 +496,9 @@ function savePref(key, value) {
 //   selectedBooks     — Set<path> từ main.js
 //   currentFilterPath — folder đang chọn (null = All Documents)
 //   onApplied         — callback sau khi apply xong
+//   onRetry           — callback(paths) để chạy lại AI cho các sách bị lỗi
 // =============================================
-export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, onApplied) {
+export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, onApplied, onRetry) {
     const settings = await api.getAiSettings().catch(() => null);
     if (!settings) { alert("Could not load AI settings."); return; }
     // Thiếu key / model được backend báo khi bấm Start; chỉ ChatGPT cần kiểm tra trước
@@ -756,7 +757,11 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     progress.hidden = true;
     const resultsWrap = el("div");
     resultsWrap.style.cssText = "display:flex; flex-direction:column; gap:8px;";
-    body.append(costBox, statusText, progress, resultsWrap);
+    // Sách bị lỗi: chạy lại, hoặc gắn tag để tìm lại sau — hiện khi lượt chạy xong
+    const failedBox = el("div");
+    failedBox.style.cssText = "display:flex; flex-wrap:wrap; gap:8px; align-items:center;";
+    failedBox.hidden = true;
+    body.append(costBox, statusText, progress, failedBox, resultsWrap);
 
     // Footer
     const footer = el("div");
@@ -859,6 +864,13 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         await Promise.all(Array.from({ length: Math.min(CONCURRENCY, eligible.length) }, worker));
 
         const doneCount = results.filter(r => !r.suggestion.error).length;
+        // Lỗi riêng từng sách + sách chưa tới lượt khi lượt chạy bị dừng
+        const returned = new Set(results.map(r => r.suggestion.path));
+        const failedPaths = [
+            ...results.filter(r => r.suggestion.error).map(r => r.suggestion.path),
+            ...eligible.filter(b => !returned.has(b.path)).map(b => b.path),
+        ];
+        if (failedPaths.length > 0) showFailedActions(failedPaths, saveAsTheyArrive);
         if (runError) {
             setStatus(statusText, `Stopped: ${runError} (${doneCount}/${total} books done)`, "error");
         } else {
@@ -902,14 +914,57 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         }
     }
 
-    // Apply
-    applyBtn.onclick = async () => {
-        applyBtn.disabled = true;
+    // Lưu mọi kết quả chưa lưu (bỏ qua sách lỗi / đã lưu)
+    async function applyPending() {
+        footer.querySelectorAll("button").forEach(b => { b.disabled = true; });
+        failedBox.querySelectorAll("button, input").forEach(b => { b.disabled = true; });
         applyBtn.innerText = "Applying...";
         const books = await api.getBooks();
         for (const result of results) await applyResult(result, books);
+    }
+
+    // Apply
+    applyBtn.onclick = async () => {
+        await applyPending();
         close();
     };
+
+    function showFailedActions(failedPaths, alreadySaved) {
+        const n = failedPaths.length;
+        const retryBtn = button(`Retry failed (${n})`, "", async () => {
+            await applyPending();
+            close();
+            onRetry?.(failedPaths);
+        });
+        const tagInput = input("text", loadPref("aiFailedTag", "AI failed"));
+        tagInput.style.cssText = "width:130px; padding:4px 8px; font-size:12px;";
+        tagInput.title = "Tag to add to the failed books";
+        const tagBtn = button("Tag failed & close", "", async () => {
+            const tag = tagInput.value.trim();
+            if (!tag) return;
+            savePref("aiFailedTag", tag);
+            await applyPending();
+            const books = await api.getBooks();
+            for (const path of failedPaths) {
+                const book = books.find(b => b.path === path);
+                if (!book || book.tags.some(t => t.toLowerCase() === tag.toLowerCase())) continue;
+                try {
+                    await api.updateBook(path, book.file_name, [...book.tags, tag]);
+                    appliedCount++;
+                } catch (err) {
+                    console.error("Tag failed book error:", path, err);
+                }
+            }
+            close();
+        });
+        failedBox.append(el("span", "status error", `${n} book${n === 1 ? "" : "s"} failed.`), retryBtn, tagBtn, tagInput);
+        if (!alreadySaved) {
+            const note = hint("Both also apply the successful results.");
+            note.style.width = "100%";
+            failedBox.append(note);
+        }
+        failedBox.hidden = false;
+    }
 }
 
 // Đánh dấu row đã lưu: badge "Saved" + khóa các ô sửa

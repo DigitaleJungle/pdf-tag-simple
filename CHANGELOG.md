@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.3] - 2026-10-08
+
+### Added
+- AI auto: when books fail (no text in the PDF, file too large, run stopped), two new buttons appear after the run. **Retry failed** selects those books in the grid and reopens AI auto with just them, so you can try another AI method. **Tag failed & close** gives them a tag (default "AI failed") so you can find them later. Both also apply the successful results.
+
 ## [1.2.2] - 2026-10-08
 
 ### Added
