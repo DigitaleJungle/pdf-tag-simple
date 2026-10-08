@@ -537,12 +537,13 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     optionsWrap.append(label("Books"), scopeSelect);
 
     // --- What to fill in --- (nhớ lại giữa các lần mở)
-    const fill = { tags: true, short_description: false, description: false, ...loadPref("aiFillOptions", {}) };
+    const fill = { tags: true, name: false, short_description: false, description: false, ...loadPref("aiFillOptions", {}) };
     const fillBlock = el("div");
     fillBlock.style.cssText = "display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;";
     fillBlock.appendChild(label("Fill in"));
     const fillCheckboxes = [
         ["tags", "Tags"],
+        ["name", "Name"],
         ["short_description", "Short description"],
         ["description", "Long description"],
     ].map(([key, text]) => {
@@ -679,7 +680,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     const helpBlock = el("div");
     helpBlock.style.cssText = "display:flex; flex-direction:column; gap:4px; border-top:1px solid var(--border); padding-top:8px;";
     helpBlock.append(
-        hint("Descriptions replace the current ones (editable before applying). Best with PDF text, pages or PDF file."),
+        hint("Names and descriptions replace the current ones (editable before applying). Best with PDF text, pages or PDF file."),
         runInputHint,
     );
     moreBody.append(
@@ -711,7 +712,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 
     // Sách cần xử lý: thiếu tags (khi chọn Tags) hoặc có chọn description
     const needsWork = (b) => (fill.tags && (b.tags?.length || 0) < settings.skip_if_tags_gte)
-        || fill.short_description || fill.description;
+        || fill.name || fill.short_description || fill.description;
 
     // --- Cost estimate ---
     // Ẩn khi dùng Ollama (free), ChatGPT (tính vào plan) hoặc Gemini trả phí (giá tùy model)
@@ -732,7 +733,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         }
         const { totalTokens, cost } = estimateCost(eligible, mode);
         let costText = `~${eligible} books · ~${totalTokens.toLocaleString()} tokens · Est. cost: $${cost}`;
-        if (fill.short_description || fill.description) costText += " + descriptions";
+        if (fill.name || fill.short_description || fill.description) costText += " + names/descriptions";
         if (mode === "thumbnail") {
             costText += " ⚠️ Thumbnail mode costs more";
         } else if (mode === "pages" || mode === "pdf") {
@@ -783,7 +784,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
 
     // Start
     startBtn.onclick = async () => {
-        if (!fill.tags && !fill.short_description && !fill.description) {
+        if (!fill.tags && !fill.name && !fill.short_description && !fill.description) {
             statusText.innerText = "Choose at least one thing for the AI to fill in.";
             return;
         }
@@ -807,7 +808,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
         };
 
         // Thu gọn lựa chọn thành 1 dòng để kết quả có chỗ
-        const filled = [["tags", "Tags"], ["short_description", "Short description"], ["description", "Long description"]]
+        const filled = [["tags", "Tags"], ["name", "Name"], ["short_description", "Short description"], ["description", "Long description"]]
             .filter(([key]) => runOptions[key]).map(([, text]) => text).join(", ");
         const summaryParts = [`${eligible.length} book${eligible.length === 1 ? "" : "s"}`, filled, inputModeLabel(runOptions.input_mode)];
         if (runOptions.extra_prompt) summaryParts.push("with extra instructions");
@@ -880,11 +881,11 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
     async function applyResult(result, books) {
         const { suggestion: s } = result;
         if (s.error || result.applied) return;
-        const { tags, short, long } = result.values();
+        const { tags, name, short, long } = result.values();
         // Chỉ lưu description khi được tạo ở lần chạy này và không bị xóa trống
         const newShort = s.short_description != null && short ? short : undefined;
         const newLong = s.description != null && long ? long : undefined;
-        if (tags.length === 0 && newShort === undefined && newLong === undefined) return;
+        if (tags.length === 0 && !name && newShort === undefined && newLong === undefined) return;
 
         try {
             const book = books.find(b => b.path === s.path);
@@ -892,7 +893,7 @@ export async function openAiAutoTag(allBooks, selectedBooks, currentFilterPath, 
             for (const t of tags) {
                 if (!merged.some(x => x.toLowerCase() === t.toLowerCase())) merged.push(t);
             }
-            await api.updateBook(s.path, book?.file_name || s.file_name, merged, newLong, newShort);
+            await api.updateBook(s.path, name || book?.file_name || s.file_name, merged, newLong, newShort);
             result.applied = true;
             appliedCount++;
             markRowSaved(result.row);
@@ -936,7 +937,7 @@ function renderSuggestionRow(suggestion, book) {
         const errEl = el("div", "status error", "Error: " + suggestion.error);
         errEl.style.fontSize = "11px";
         row.appendChild(errEl);
-        return { row, suggestion, values: () => ({ tags: [], short: "", long: "" }) };
+        return { row, suggestion, values: () => ({ tags: [], name: "", short: "", long: "" }) };
     }
 
     const tags = [...suggestion.suggested_tags];
@@ -952,6 +953,8 @@ function renderSuggestionRow(suggestion, book) {
         row.append(fieldLabel, field);
         return field;
     }
+    const nameField = suggestion.name != null
+        ? addTextField("Name", suggestion.name, book.file_name, false) : null;
     const shortField = suggestion.short_description != null
         ? addTextField("Short description", suggestion.short_description, book.short_description, false) : null;
     const longField = suggestion.description != null
@@ -962,6 +965,7 @@ function renderSuggestionRow(suggestion, book) {
         suggestion,
         values: () => ({
             tags,
+            name: (nameField?.value || "").trim(),
             short: (shortField?.value || "").trim(),
             long: (longField?.value || "").trim(),
         }),

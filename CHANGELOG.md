@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.2] - 2026-10-08
+
+### Added
+- AI auto: new **Name** option under "Fill in". The AI suggests a clean display name (title, plus author or volume when it can tell) that you can edit before applying. Only the name shown in the app changes; the file on disk keeps its name.
+
 ## [1.2.1] - 2026-10-07
 
 ### Changed

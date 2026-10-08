@@ -132,6 +132,8 @@ pub struct AiTagSuggestion {
     pub short_description: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
     pub error: Option<String>,  // Nếu có lỗi khi tag sách này
 }
 
@@ -144,6 +146,8 @@ pub struct AiFillOptions {
     pub short_description: bool,
     #[serde(default)]
     pub description: bool,
+    #[serde(default)]
+    pub name: bool,
     // Hướng dẫn thêm cho lần chạy này (từ prompt soạn sẵn hoặc tự gõ) — rỗng = không gửi
     #[serde(default)]
     pub extra_prompt: String,
@@ -163,11 +167,12 @@ struct Wanted {
     tags: bool,
     short_description: bool,
     description: bool,
+    name: bool,
 }
 
 impl Wanted {
     fn any_text(&self) -> bool {
-        self.short_description || self.description
+        self.short_description || self.description || self.name
     }
 }
 
@@ -270,7 +275,10 @@ fn build_prompt(
     if want.description {
         tasks.push("Write a longer description: one paragraph of 3-6 sentences about the book's subject, contents and intended reader.".to_string());
     }
-    if want.any_text() {
+    if want.name {
+        tasks.push("Suggest a clean, readable name for the book (its title, plus author or volume if shown in the filename or content). Keep the title in its original language. No file extension, no underscores.".to_string());
+    }
+    if want.short_description || want.description {
         let source = if image_note.is_empty() { "the filename" } else { "the filename and the provided content" };
         rules.push(format!(
             "- Descriptions: only state what you can tell from {}. Don't invent specific details such as authors, dates or plot points. If the content is unclear, keep it general.",
@@ -285,6 +293,10 @@ fn build_prompt(
         if want.tags {
             keys.push("\"tags\" (array of strings)");
             example.insert("tags".into(), serde_json::json!(["self-help", "productivity"]));
+        }
+        if want.name {
+            keys.push("\"name\" (string)");
+            example.insert("name".into(), serde_json::json!("Atomic Habits - James Clear"));
         }
         if want.short_description {
             keys.push("\"short_description\" (string)");
@@ -467,6 +479,14 @@ fn limit_tags(tags: Vec<String>, max_tags: u32) -> Vec<String> {
     unique
 }
 
+// Tên AI đề xuất + đuôi file của tên cũ (vd ".pdf"), nếu tên cũ có đuôi mà tên mới chưa có
+fn keep_extension(name: &str, old_name: &str) -> String {
+    match std::path::Path::new(old_name).extension().and_then(|e| e.to_str()) {
+        Some(ext) if !name.to_lowercase().ends_with(&format!(".{}", ext.to_lowercase())) => format!("{}.{}", name, ext),
+        _ => name.to_string(),
+    }
+}
+
 // ===== PARSE AI RESPONSE =====
 
 // Parse JSON array từ response AI
@@ -490,9 +510,9 @@ fn parse_tags_from_response(text: &str) -> Vec<String> {
 }
 
 // Đọc câu trả lời theo những gì đã yêu cầu: JSON array (chỉ tags) hoặc JSON object
-fn parse_ai_response(text: &str, want: Wanted) -> Result<(Vec<String>, Option<String>, Option<String>), String> {
+fn parse_ai_response(text: &str, want: Wanted) -> Result<(Vec<String>, Option<String>, Option<String>, Option<String>), String> {
     if !want.any_text() {
-        return Ok((parse_tags_from_response(text), None, None));
+        return Ok((parse_tags_from_response(text), None, None, None));
     }
     if let (Some(s), Some(e)) = (text.find('{'), text.rfind('}')) {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text[s..=e]) {
@@ -512,8 +532,9 @@ fn parse_ai_response(text: &str, want: Wanted) -> Result<(Vec<String>, Option<St
             };
             let short = field("short_description", want.short_description);
             let long = field("description", want.description);
-            if !tags.is_empty() || short.is_some() || long.is_some() {
-                return Ok((tags, short, long));
+            let name = field("name", want.name);
+            if !tags.is_empty() || short.is_some() || long.is_some() || name.is_some() {
+                return Ok((tags, short, long, name));
             }
         }
     }
@@ -1059,7 +1080,7 @@ pub async fn suggest_tags(
 ) -> Result<AiTagSuggestion, String> {
     let settings = get_ai_settings(app_handle.clone())?;
 
-    if !options.tags && !options.short_description && !options.description {
+    if !options.tags && !options.short_description && !options.description && !options.name {
         return Err("Choose at least one thing for the AI to fill in.".to_string());
     }
 
@@ -1087,6 +1108,7 @@ pub async fn suggest_tags(
         tags: options.tags && book.current_tags.len() < settings.skip_if_tags_gte as usize,
         short_description: options.short_description,
         description: options.description,
+        name: options.name,
     };
     let empty = AiTagSuggestion {
         path: book.path.clone(),
@@ -1094,6 +1116,7 @@ pub async fn suggest_tags(
         suggested_tags: Vec::new(),
         short_description: None,
         description: None,
+        name: None,
         error: None,
     };
     if !want.tags && !want.any_text() {
@@ -1150,10 +1173,12 @@ pub async fn suggest_tags(
     };
 
     Ok(match answer.and_then(|text| parse_ai_response(&text, want)) {
-        Ok((tags, short_description, description)) => AiTagSuggestion {
+        Ok((tags, short_description, description, name)) => AiTagSuggestion {
             suggested_tags: limit_tags(tags, settings.max_tags),
             short_description,
             description,
+            // Giữ đuôi .pdf như tên hiển thị hiện tại
+            name: name.map(|n| keep_extension(&n, &book.file_name)),
             ..empty.clone()
         },
         Err(e) => failed(e),

@@ -49,7 +49,7 @@ The **summary panel** shows the cover, star, tags, descriptions, date added, pat
 - Rendered pages are cached on disk (size limit configurable under *Settings → General*).
 
 ### AI auto
-Fills in **tags**, a **short description** and/or a **long description** for all books, the current folder, a selection, or a single book.
+Fills in **tags**, a **name**, a **short description** and/or a **long description** for all books, the current folder, a selection, or a single book.
 
 Providers (set in *Settings → AI Settings*):
 

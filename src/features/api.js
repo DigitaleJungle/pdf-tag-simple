@@ -42,9 +42,9 @@ export const api = {
     getAiSettings: () => invoke("get_ai_settings"),
     saveAiSettings: (settings) => invoke("save_ai_settings", { settings }),
 
-    // Suggest tags / descriptions cho 1 sách — trả về {path, file_name, suggested_tags, short_description, description, error}
+    // Suggest tags / descriptions cho 1 sách — trả về {path, file_name, suggested_tags, name, short_description, description, error}
     // Reject = lỗi chung (key sai, hết quota...) → dừng cả lượt chạy
-    // options = { tags, short_description, description, extra_prompt, input_mode }
+    // options = { tags, name, short_description, description, extra_prompt, input_mode }
     suggestTags: (book, options) => invoke("suggest_tags", { book, options }),
 
     // Kiểm tra Ollama có đang chạy ở host không
