@@ -1,26 +1,22 @@
 import { api } from "./api.js";
 import { addCover } from "./ui.js";
+import { summaryBookPath, closeSummaryPanel } from "./f_summary.js";
 
 // =============================================
 // createCard — tạo 1 card sách trong grid
 //
 // Params:
 //   book           — BookEntry object
-//   onOpen         — callback khi click (mở PDF trong reader, chỉ dùng ở Read Mode)
+//   onOpen         — callback khi double click (đọc sách — reader hoặc app mặc định)
 //   onContextMenu  — callback khi right click (context menu)
 //   isSelected     — bool, card đang được chọn không
-//   onToggleSelect — callback khi single click (toggle select)
-//   clickBehavior  — "select" (mặc định, click chọn/double-click mở "Edit name & Tags") |
-//                     "open-default" (click mở bằng app mặc định của hệ thống) |
-//                     "open-reader" (click mở ngay trong reader, double-click vô hiệu) |
-//                     "summary" (click mở summary panel bên phải, double-click mở reader)
-//   onEditBook     — callback khi double click trong Manage mode ("select") — mở
-//                    modal "Edit name & Tags" thay vì mở reader
+//   onToggleSelect — callback khi click vào chấm tròn góc trên trái (shift = chọn range)
+//   Click vào card → mở summary panel bên phải (click lại sách đang hiện → đóng)
 //   detailed       — true = card ngang, lớn hơn (setting "Show short description"):
 //                    bìa bên trái; bên phải title, star, tags (góc trên phải)
 //                    và short description
 // =============================================
-export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, clickBehavior = "select", onEditBook = null, detailed = false) {
+export function createCard(book, onOpen, onContextMenu, isSelected = false, onToggleSelect = null, detailed = false) {
     const card = document.createElement("div");
 
     // Hàm apply style theo trạng thái selected/unselected
@@ -47,25 +43,40 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
 
     applyCardStyle(isSelected);
 
-    // --- Checkbox indicator (góc trên trái, chỉ hiện khi selected) ---
+    // --- Chấm tròn chọn sách (góc trên trái): click = toggle, shift+click = range ---
     const checkmark = document.createElement("div");
-    checkmark.style.cssText = `
-        position: absolute;
-        top: 6px;
-        left: 6px;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: var(--primary);
-        color: white;
-        font-size: 11px;
-        display: ${isSelected ? "flex" : "none"};
-        align-items: center;
-        justify-content: center;
-        z-index: 1;
-        font-weight: bold;
-    `;
-    checkmark.innerText = "✓";
+    checkmark.setAttribute("role", "checkbox");
+    checkmark.title = "Select (Shift+click: select range)";
+    function applyCheckStyle(selected) {
+        checkmark.setAttribute("aria-checked", String(selected));
+        checkmark.innerText = selected ? "✓" : "";
+        checkmark.style.cssText = `
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            width: 18px;
+            height: 18px;
+            box-sizing: border-box;
+            border-radius: 50%;
+            border: 1.5px solid ${selected ? "var(--primary)" : "var(--text-secondary)"};
+            background: ${selected ? "var(--primary)" : "var(--panel)"};
+            color: white;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+            font-weight: bold;
+            opacity: ${selected ? "1" : "0.6"};
+        `;
+    }
+    applyCheckStyle(isSelected);
+    checkmark.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (typeof onToggleSelect === "function") onToggleSelect(book.path, e.shiftKey);
+    });
+    // Click nhanh 2 lần vào chấm = toggle 2 lần, không mở reader
+    checkmark.addEventListener("dblclick", (e) => e.stopPropagation());
     card.appendChild(checkmark);
 
     // --- Star button (góc trên phải) ---
@@ -229,63 +240,14 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     }
 
     // --- Events ---
-    // Single click toggles selection after a short delay, so a following second
-    // click (the start of a double-click) can cancel it before it applies — this
-    // is what stops a double click from opening the reader/editor AND toggling
-    // selection. But that alone isn't airtight: if the user's actual double-click
-    // is slower than the delay, the first click's toggle can fire before the
-    // second click/dblclick arrives. So this also tracks whether the pending
-    // toggle already applied (pendingToggleApplied) and, if dblclick sees that
-    // it has, immediately reverses it — guaranteeing a double click never
-    // changes the selected state, no matter how slow the two clicks are.
-    let clickTimer = null;
-    let pendingToggleApplied = false;
-    let pendingShiftKey = false;
-
     card.addEventListener("click", (e) => {
         if (e.defaultPrevented) return;
-        if (clickBehavior === "open-reader") {
-            onOpen(book);
-            return;
-        }
-        if (clickBehavior === "open-default") {
-            window.__TAURI__.opener.openPath(book.path);
-            return;
-        }
-        if (clickBehavior === "summary") {
-            window.__APP_ACTIONS__?.openSummary?.(book);
-            return;
-        }
-        clearTimeout(clickTimer);
-        if (e.detail > 1) return; // 2nd+ click of a multi-click — dblclick handles it
-        pendingToggleApplied = false;
-        pendingShiftKey = e.shiftKey;
-        clickTimer = setTimeout(() => {
-            pendingToggleApplied = true;
-            if (typeof onToggleSelect === "function") {
-                onToggleSelect(book.path, pendingShiftKey);
-            }
-        }, 200);
+        if (e.detail > 1) return; // 2nd click of a double-click — dblclick opens the reader
+        if (summaryBookPath() === book.path) closeSummaryPanel();
+        else window.__APP_ACTIONS__?.openSummary?.(book);
     });
 
-    card.addEventListener("dblclick", (e) => {
-        // Summary view: click mở panel, double-click mở reader
-        if (clickBehavior === "summary") {
-            onOpen(book);
-            return;
-        }
-        if (clickBehavior !== "select") return; // single click already handles opening
-        clearTimeout(clickTimer);
-        if (pendingToggleApplied) {
-            // The first click's toggle already fired — undo it so the net effect
-            // of this double click on selection is nothing.
-            pendingToggleApplied = false;
-            if (typeof onToggleSelect === "function") {
-                onToggleSelect(book.path, pendingShiftKey);
-            }
-        }
-        if (typeof onEditBook === "function") onEditBook(book);
-    });
+    card.addEventListener("dblclick", () => onOpen(book));
 
     card.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -295,7 +257,7 @@ export function createCard(book, onOpen, onContextMenu, isSelected = false, onTo
     // Expose update visual từ bên ngoài
     card.setSelected = (selected) => {
         applyCardStyle(selected);
-        checkmark.style.display = selected ? "flex" : "none";
+        applyCheckStyle(selected);
     };
 
     return card;

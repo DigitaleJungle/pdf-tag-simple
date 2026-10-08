@@ -2,7 +2,7 @@ import { api } from "./api.js";
 import { addCover, overlayOpen } from "./ui.js";
 
 // =============================================
-// f_summary.js — Summary panel bên phải (Behaviour = "Summary view")
+// f_summary.js — Summary panel bên phải (click vào card)
 //
 // Export:
 //   openSummaryPanel(book, actions) — mở panel (hoặc đổi sang sách khác)
@@ -208,6 +208,7 @@ function render(reloadThumb) {
         btn.onclick = onClick;
         actionsRow.appendChild(btn);
     };
+    // "Read" chiếm cả hàng — hành động chính của panel
     if (currentActions?.onRead) makeAction("Read", () => currentActions.onRead(book), true);
     // Chỉ hiện khi AI được bật (toggle "Activate AI" trong AI Settings)
     if (currentActions?.onAi && window.__APP_ACTIONS__?.isAiEnabled?.()) {

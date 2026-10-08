@@ -156,7 +156,7 @@ a { color: var(--primary); text-decoration: none; }
 
 .main-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* nút sidebar / card size / theme dính hàng trên khi .toolbar-middle 2 hàng */
   gap: 10px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--border);
@@ -209,6 +209,19 @@ a { color: var(--primary); text-decoration: none; }
   margin-bottom: 6px;
   padding: 0 4px;
 }
+/* Sections thu gọn được — f_sidebar_sections.js */
+button.section-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+}
+button.section-title::before { content: "▾"; font-size: 10px; transition: transform 0.15s; }
+.sidebar-section.collapsed button.section-title::before { transform: rotate(-90deg); }
+.sidebar-section.collapsed .section-body { display: none; }
+/* Same spacing as .sidebar-inner — the wrapper would otherwise swallow its gap */
+#sidebar-sections { display: flex; flex-direction: column; gap: 16px; }
 
 /* Toolbar grid buttons */
 .toolbar {
@@ -264,6 +277,11 @@ a { color: var(--primary); text-decoration: none; }
   border-color: var(--border-strong);
 }
 
+/* Search + .toolbar-actions: vùng duy nhất được xuống hàng. Không đủ chỗ → cả khối
+   .toolbar-actions (continue reading, selection, sort) xuống dưới search cùng lúc */
+.toolbar-middle { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
 /* Dark mode toggle button */
 #btn-theme-toggle {
   width: 34px;
@@ -294,6 +312,8 @@ a { color: var(--primary); text-decoration: none; }
 }
 
 #search-input { flex: 1; min-width: 180px; }
+/* Hàng trên cùng chiều cao — toolbar căn top (align-items: flex-start) nên không tự căn giữa */
+#search-input, .main-toolbar > button { height: 34px; }
 #tag-search-input { width: 100%; }
 #sort-select { background: var(--panel); }
 
@@ -485,7 +505,7 @@ a { color: var(--primary); text-decoration: none; }
 .grid-scroll-area::-webkit-scrollbar-track { background: transparent; }
 
 /* ------------------------------------------------
-   SUMMARY PANEL (Behaviour = "Summary view") — f_summary.js
+   SUMMARY PANEL (click vào card) — f_summary.js
 ------------------------------------------------ */
 .summary-panel {
   width: 0;
@@ -576,7 +596,7 @@ a { color: var(--primary); text-decoration: none; }
   font-size: 12px;
   cursor: pointer;
 }
-.summary-actions button.summary-primary { background: var(--primary); border-color: var(--primary); color: white; font-weight: 600; }
+.summary-actions button.summary-primary { flex-basis: 100%; padding: 10px; font-size: 14px; background: var(--primary); border-color: var(--primary); color: white; font-weight: 600; }
 .summary-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); margin-top: 8px; }
 .summary-text { font-size: 13px; line-height: 1.5; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .summary-empty { font-size: 13px; font-style: italic; color: var(--text-secondary); }
@@ -803,7 +823,6 @@ input.switch:checked::after { left: 20px; }
   .sidebar { width: 100%; min-width: 100%; max-width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
   .sidebar-inner { max-height: 40vh; }
   .main-panel { height: auto; }
-  .main-toolbar { flex-wrap: wrap; }
   .toolbar { grid-template-columns: 1fr 1fr; }
   .app-shell.sidebar-collapsed .sidebar { height: 0; border-bottom: none; }
   .summary-panel.open { width: 100%; min-width: 100%; height: auto; max-height: 50vh; border-left: none; border-top: 1px solid var(--border); }

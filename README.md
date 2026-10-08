@@ -22,26 +22,29 @@ Click **Update DB** again whenever files are added, moved or removed. Before eac
 
 ### Library
 - **Thumbnail grid** with small or large cards. Large cards also show the short description.
-- **Folders sidebar**: filter by library folder. The sidebar can be collapsed (`Ctrl + B`).
+- **Folders sidebar**: filter by library folder. The sidebar can be collapsed (`Ctrl + B`), and each sidebar section (Folders, Tags, Description) can be collapsed by clicking its title.
 - **Tag filter**: click tags to filter. Tags can be searched, renamed and deleted, and you can filter on untagged books.
+- **Description filter**: show only books that do (Yes) or don't (No) have a short and/or long description.
 - **Search** across file name, tags, short description and description.
-- **Sort** by name, date added, or missing short/long description first.
+- **Sort** by name or date added.
 - **Star** favourites.
-- **Hide / Trash**: hide books from the library and restore them from the Trash view.
+- **Hide / Trash**: hide a book from the library (right-click menu) and restore books from the Trash view.
 - **Find duplicates**: a basic duplicate finder.
 - **Edit details**: name, tags, short description and long description, for one book or for a selection (bulk tag editing).
 
-### Behaviour modes
-Use the toolbar button or *Settings → General* to choose what a click does:
+### Clicking books
 
-| Mode | Click | Double click |
-|------|-------|--------------|
-| Manage | Select | Edit details |
-| Read: default app | Open in your PDF viewer | |
-| Read: in-app | Open in the built-in reader | |
-| Summary | Show details in the right-hand panel | Open the reader |
+| Action | Result |
+|--------|--------|
+| Click a book | Show its details in the summary panel (click it again to close the panel) |
+| Double-click a book | Read it |
+| Click the circle in the top-left corner | Select or deselect the book |
+| `Shift` + click the circle | Select or deselect a range, like Windows Explorer |
+| Right-click | Read in app, open in default app, edit details, hide, AI auto, ... |
 
-The **summary panel** shows the cover, star, tags, descriptions, date added, path, page count and file size, with buttons for Read, Open in default app, Edit details, Show in folder and AI auto. The panel can be resized, and it can also be opened inside the reader.
+Books open in the built-in reader. Turn off *Settings → General → Use the in-app reader* to open them in your default PDF app instead.
+
+The **summary panel** shows the cover, star, tags, descriptions, date added, path, page count and file size, with a large Read button and buttons for Open in default app, Edit details, Show in folder and AI auto. The panel can be resized, and it can also be opened inside the reader.
 
 ### Built-in reader
 - Zoom with the mouse wheel, keyboard or pinch, and swipe between books on touch screens.
@@ -83,7 +86,7 @@ Other options: maximum tags per book, skip books that already have enough tags, 
 | `Ctrl + F` | Focus the search box |
 | `Ctrl + B` | Show or hide the sidebar |
 | `Esc` | Clear the selection |
-| `Shift + Click` | Select a range |
+| `Shift + Click` (on the circle) | Select or deselect a range |
 
 **Reader**
 

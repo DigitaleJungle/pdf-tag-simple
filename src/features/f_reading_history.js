@@ -12,9 +12,7 @@
 // Up to MAX_RECENT_ENTRIES non-bookmarked entries are kept automatically
 // (the normal "last 3 books" rotation); bookmarked entries are kept
 // regardless, up to the generous MAX_BOOKMARKS safety cap — bookmarking is
-// what exempts a session from that rotation. Nothing in this module knows
-// about "Read Mode" — gating writes to when that's active is the caller's
-// job (f_reader.js), same as it always was.
+// what exempts a session from that rotation.
 //
 // LAST_FILTERS_KEY is a live mirror of main.js's current filter state,
 // written on every grid render. It's read here at save time as a snapshot

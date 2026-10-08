@@ -1,15 +1,13 @@
 import { api } from "./api.js";
 import { renderAiSettingsSection } from "./f_ai.js";
-import { el, label, hint, input, select, button, checkbox, divider, openModal, setStatus } from "./ui.js";
+import { useInAppReader, setUseInAppReader } from "./f_reader.js";
+import { el, label, hint, input, button, checkbox, divider, openModal, setStatus } from "./ui.js";
 
 // =============================================
 // f_settings.js — App Settings modal
 //
 // Export:
-//   BEHAVIOURS          — các kiểu Behaviour (dùng chung với nút Behaviour trên toolbar, main.js)
 //   openSettings(ctx)   — mở modal settings (sidebar trái + panel phải)
-//     ctx.clickBehavior       — một trong BEHAVIOURS[].value
-//     ctx.onClickBehaviorChange(value) — gọi khi user đổi Behaviour
 //     ctx.showShortDescription — bool, card ngang có short description
 //     ctx.onShowShortDescriptionChange(value) — gọi khi user bật/tắt checkbox đó
 //     ctx.onAddPath()         — gọi khi user bấm "Add Path"
@@ -23,13 +21,6 @@ import { el, label, hint, input, select, button, checkbox, divider, openModal, s
 // Thêm section mới: push vào SECTIONS bên dưới với { id, label, render(container, ctx) }
 // render(container, ctx) có thể là async.
 // =============================================
-
-export const BEHAVIOURS = [
-    { value: "select", label: "Manage", hint: "Click selects; double-click edits" },
-    { value: "open-default", label: "Read: default app", hint: "Click opens in your PDF viewer" },
-    { value: "open-reader", label: "Read: in-app", hint: "Click opens in the built-in reader" },
-    { value: "summary", label: "Summary", hint: "Click shows details on the right; double-click opens the reader" },
-];
 
 const SECTIONS = [
     { id: "general", label: "General", render: renderGeneralSection },
@@ -151,18 +142,15 @@ async function renderGeneralSection(container, ctx) {
     pathGroup.append(pathList, actionRow);
     wrap.appendChild(pathGroup);
 
-    // --- Behaviour ---
-    const clickGroup = group("Behaviour");
-    const behaviourSelect = select(BEHAVIOURS, ctx.clickBehavior);
-    const behaviourHint = hint("");
-    const updateHint = () => { behaviourHint.innerText = BEHAVIOURS.find(o => o.value === behaviourSelect.value)?.hint || ""; };
-    updateHint();
-    behaviourSelect.addEventListener("change", () => {
-        updateHint();
-        ctx.onClickBehaviorChange(behaviourSelect.value);
-    });
-    clickGroup.append(behaviourSelect, behaviourHint);
-    wrap.appendChild(clickGroup);
+    // --- Reading ---
+    const readGroup = group("Reading");
+    const inAppReader = checkbox("Use the in-app reader", useInAppReader());
+    inAppReader.box.addEventListener("change", () => setUseInAppReader(inAppReader.box.checked));
+    readGroup.append(
+        inAppReader.row,
+        hint("Double-click a book or press Read to open it in the built-in reader. When off, books open in your default PDF app."),
+    );
+    wrap.appendChild(readGroup);
 
     // --- Overview ---
     const overviewGroup = group("Overview");

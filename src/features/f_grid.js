@@ -1,6 +1,6 @@
 import { createCard } from "./ui_grid_card.js";
-import { showCardContextMenu, openEditModal, openBulkTagModal } from "./ui_grid_menu.js";
-import { openReader } from "./f_reader.js";
+import { showCardContextMenu } from "./ui_grid_menu.js";
+import { readBook } from "./f_reader.js";
 import { isInFolder } from "./ui.js";
 
 // =============================================
@@ -22,13 +22,13 @@ let gridState = {
 export function renderAssetGrid(
     container, books, filterPath, search, sort, selectedTags,
     onGridUpdate, viewMode = "library",
-    selectedBooks = new Set(), onToggleSelect = null, clickBehavior = "select",
-    untaggedOnly = false, showShortDescription = false
+    selectedBooks = new Set(), onToggleSelect = null,
+    untaggedOnly = false, showShortDescription = false, descFilters = {}
 ) {
     if (observer) observer.disconnect();
 
     gridState.container = container;
-    gridState.filteredBooks = applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly);
+    gridState.filteredBooks = applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly, descFilters);
     gridState.displayCount = 0;
     gridState.viewMode = viewMode;
     gridState.detailed = showShortDescription;
@@ -45,10 +45,10 @@ export function renderAssetGrid(
         return;
     }
 
-    renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior);
+    renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect);
 }
 
-function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior) {
+function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect) {
     const { container, filteredBooks, displayCount, pageSize, viewMode, detailed } = gridState;
     const end = Math.min(displayCount + pageSize, filteredBooks.length);
 
@@ -58,18 +58,10 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehav
 
         const card = createCard(
             book,
-            (openedBook) => openReader(openedBook),
+            (openedBook) => readBook(openedBook),
             (x, y, b) => showCardContextMenu(x, y, b, onGridUpdate, viewMode, selectedBooks),
             isSelected,
             onToggleSelect,
-            clickBehavior,
-            (editedBook) => {
-                // Double-clicking a book that's part of a multi-selection edits
-                // tags for the whole selection, matching the right-click menu.
-                const isBulk = selectedBooks.size > 1 && selectedBooks.has(editedBook.path);
-                if (isBulk) openBulkTagModal([...selectedBooks], onGridUpdate);
-                else openEditModal(editedBook, onGridUpdate);
-            },
             detailed
         );
 
@@ -90,7 +82,7 @@ function renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehav
 
         observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting) {
-                renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect, clickBehavior);
+                renderNextBatch(onGridUpdate, selectedBooks, onToggleSelect);
             }
         }, { rootMargin: "200px" });
 
@@ -135,7 +127,7 @@ export function getFilteredPaths() {
     return gridState.filteredBooks.map(b => b.path);
 }
 
-function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly) {
+function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnly, descFilters) {
     let result = books;
 
     // 1. Filter theo folder (null = All Documents)
@@ -163,21 +155,20 @@ function applyFilters(books, filterPath, search, sort, selectedTags, untaggedOnl
         });
     }
 
-    // 4. Sort — starred LUÔN lên đầu bất chấp sort kiểu gì.
-    // Ngoại lệ "missing-*": sách thiếu description lên đầu trước, rồi mới tới starred,
-    // để sách có starred mà đã có description không chen lên trên những sách cần điền
+    // 4. Filter theo có/không có description — "yes" | "no" | null (không lọc)
+    [["short_description", descFilters.short], ["description", descFilters.long]].forEach(([field, want]) => {
+        if (want) result = result.filter(b => !!(b[field] || "").trim() === (want === "yes"));
+    });
+
+    // 5. Sort — starred LUÔN lên đầu bất chấp sort kiểu gì.
     const byName = (a, b) => a.file_name.toLowerCase().localeCompare(b.file_name.toLowerCase());
-    const missing = (field) => (a, b) => !(a[field] || "").trim() - !(b[field] || "").trim();
     const comparators = {
         "name-desc": (a, b) => byName(b, a),
         "date-desc": (a, b) => (b.date_added || 0) - (a.date_added || 0),
         "date-asc": (a, b) => (a.date_added || 0) - (b.date_added || 0),
     };
     const starredFirst = (a, b) => !!b.starred - !!a.starred;
-    const descField = { "missing-short": "short_description", "missing-long": "description" }[sort];
-    const chain = descField
-        ? [(a, b) => -missing(descField)(a, b), starredFirst, byName]
-        : [starredFirst, comparators[sort] || byName];
+    const chain = [starredFirst, comparators[sort] || byName];
     return [...result].sort((a, b) => {
         for (const cmp of chain) {
             const d = cmp(a, b);

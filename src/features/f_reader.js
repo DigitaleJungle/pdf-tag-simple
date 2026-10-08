@@ -17,12 +17,10 @@ import { showMenu, bindMenuButton, overlayOpen } from "./ui.js";
 // whole reader chrome.
 //
 // "Continue reading": the current book+page is saved via f_reading_history.js
-// (shared with main.js's dropdown/button), but only while Read Mode
-// "open-reader" is active — read via the same "clickBehavior" localStorage
-// key main.js writes on every settings change (no import needed, same
-// pattern zoom already uses). The toolbar's own bookmark button is gated the
-// same way, so it's never shown for a session that was never being tracked
-// in the first place.
+// (shared with main.js's dropdown/button).
+//
+// readBook(book): opens the book in this reader, or in the system's default
+// PDF app when Settings > "Use the in-app reader" is off.
 // =============================================
 
 const RENDER_WIDTH = 1600;     // px — backend rasterizes each page at this width
@@ -33,8 +31,26 @@ const ZOOM_STEP = 0.1;
 const ZOOM_STORAGE_KEY = "pdfReaderZoom";
 const SAVE_LAST_READ_DEBOUNCE_MS = 400;
 
-function isReadModeActive() {
-    return localStorage.getItem("clickBehavior") === "open-reader";
+const IN_APP_READER_KEY = "useInAppReader";
+
+export function useInAppReader() {
+    try {
+        const stored = localStorage.getItem(IN_APP_READER_KEY);
+        if (stored !== null) return stored === "true";
+        // Migrate the old Behaviour setting: only "Read: default app" opted out
+        return localStorage.getItem("clickBehavior") !== "open-default";
+    } catch {
+        return true;
+    }
+}
+
+export function setUseInAppReader(value) {
+    try { localStorage.setItem(IN_APP_READER_KEY, String(value)); } catch { /* ignore */ }
+}
+
+export function readBook(book) {
+    if (useInAppReader()) openReader(book);
+    else window.__TAURI__.opener.openPath(book.path);
 }
 
 function loadStoredZoom() {
@@ -185,13 +201,11 @@ export async function openReader(book, initialPage = null) {
 
     // Bookmarks this book+page into the "Continue reading" history — same
     // action as the bookmark icon on a row in main.js's dropdown, and the two
-    // stay in sync since both go through f_reading_history.js. Only shown
-    // when this session is actually being tracked (Read Mode "open-reader"),
-    // same gating as the rest of "Continue reading".
+    // stay in sync since both go through f_reading_history.js.
     const bookmarkBtn = toolbarIconButton("🔖");
     bookmarkBtn.style.display = "none"; // until updateBookmarkBtn() below knows the real state
     function updateBookmarkBtn() {
-        if (!isReadModeActive() || !currentBook) {
+        if (!currentBook) {
             bookmarkBtn.style.display = "none";
             return;
         }
@@ -495,17 +509,14 @@ export async function openReader(book, initialPage = null) {
     // rather than right-click showing a different/stale set of actions.
     function showReaderMenu(anchor) {
         showMenu([
-            // Same gating as the toolbar's own bookmark button — bookmarking
-            // only means anything for a session that's actually being
-            // tracked (Read Mode "open-reader").
-            ...(isReadModeActive() ? [{
+            {
                 label: isBookmarked(currentBook.path) ? "Remove bookmark" : "Bookmark",
                 action: () => {
                     saveLastRead(); // flush the current position first, then pin it
                     toggleBookmark(currentBook.path);
                     updateBookmarkBtn();
                 }
-            }] : []),
+            },
             { label: "Open in default app", action: () => window.__TAURI__.opener.openPath(currentBook.path) },
             { label: "Open location", action: () => api.revealInExplorer(currentBook.path) },
             {
@@ -590,7 +601,6 @@ export async function openReader(book, initialPage = null) {
 
     function saveLastRead() {
         clearTimeout(saveLastReadTimer);
-        if (!isReadModeActive()) return;
         if (!currentBook || !pageEls.length) return;
         saveEntry(currentBook.path, currentPageNum);
     }

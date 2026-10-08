@@ -6,12 +6,13 @@ import { openEditModal } from "./features/ui_grid_menu.js";
 import { pickLibraryFolder } from "./features/f_addfolder.js";
 import { openAiAutoTag } from "./features/f_ai.js";
 import { openDuplicates } from "./features/f_duplicates.js";
-import { openSettings, BEHAVIOURS } from "./features/f_settings.js";
+import { openSettings } from "./features/f_settings.js";
 import { openAutoBackupPrompt } from "./features/f_backup_prompt.js";
-import { openReader } from "./features/f_reader.js";
+import { openReader, readBook } from "./features/f_reader.js";
 import { openSummaryPanel, refreshSummaryPanel, closeSummaryPanel } from "./features/f_summary.js";
 import { readList, toggleBookmark, writeCurrentFilters } from "./features/f_reading_history.js";
 import { el, showMenu, bindMenuButton, overlayOpen } from "./features/ui.js";
+import { initSidebarSections } from "./features/f_sidebar_sections.js";
 
 // ==========================================
 // STATE
@@ -21,12 +22,13 @@ let state = {
     tags: [],                // Tags để render sidebar (chỉ của sách không hidden)
     selectedTags: [],        // Tags đang filter
     untaggedOnly: false,     // Lọc riêng sách chưa có tag nào — loại trừ với selectedTags
+    shortDescFilter: null,   // "yes" | "no" | null — có short description không
+    longDescFilter: null,    // "yes" | "no" | null — có (long) description không
     currentFilterPath: null, // Folder đang chọn trong sidebar (null = All Documents)
     currentSearch: "",       // Nội dung ô tìm kiếm
     currentSort: "name-asc", // Kiểu sắp xếp
     viewMode: "library",     // "library" | "trash"
     selectedBooks: new Set(), // Set<path> — sách đang được multi-select
-    clickBehavior: localStorage.getItem("clickBehavior") || "select", // xem BEHAVIOURS (f_settings.js)
     showShortDescription: localStorage.getItem("showShortDescription") === "true" // card ngang có short description
 };
 
@@ -41,6 +43,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const assetGridContainer  = $("#asset-grid");
     const tagContainer        = $("#tag-list-container");
     const tagSearchInput      = $("#tag-search-input");
+    const descFilterContainer = $("#desc-filter-container");
     const txtStatus           = $("#txt-status");
     const searchInput         = $("#search-input");
     const sortSelect          = $("#sort-select");
@@ -52,14 +55,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     const btnThemeToggle      = $("#btn-theme-toggle");
     const btnToggleSidebar    = $("#btn-toggle-sidebar");
     const btnCardSizeToggle   = $("#btn-card-size-toggle");
-    const btnBehaviour        = $("#btn-behaviour");
 
     // Selection + trash buttons
     const btnTrashView        = $("#btn-trash-view");
     const txtTrashCount       = $("#txt-trash-count");
     const btnSettings         = $("#btn-settings");
     const txtSelectionCount   = $("#txt-selection-count");
-    const btnBulkHide         = $("#btn-bulk-hide");
     const btnBulkRestore      = $("#btn-bulk-restore");
     const btnClearSelection   = $("#btn-clear-selection");
     const btnSelectAll        = $("#btn-select-all");
@@ -134,10 +135,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Gọi từ f_reader.js khi reader đóng — refresh label/visibility của nút
         // "Continue reading" (nó có thể đã lưu 1 vị trí mới trong lúc đọc).
         onReaderClosed: () => updateJumpLastButton(),
-        // Gọi từ ui_grid_card.js khi Behaviour = "Summary view"
+        // Gọi từ ui_grid_card.js khi click vào card
         openSummary: (book) => {
             openSummaryPanel(state.books.find(b => b.path === book.path) || book, {
-                onRead: (b) => openReader(b),
+                onRead: (b) => readBook(b),
                 onEdit: (b) => openEditModal(b, () => refreshUi()),
                 onStarChanged: () => updateGrid(),
                 onAi: (b) => window.__APP_ACTIONS__.runAiOnBooks([b.path]),
@@ -167,23 +168,41 @@ window.addEventListener("DOMContentLoaded", async () => {
     // MULTI-SELECT
     // ==========================================
 
+    // Shift-range gần nhất (như Windows Explorer): shift+click tiếp theo thay range này
+    // thay vì cộng thêm; shift+click lại đúng sách cuối → hoàn tác range.
+    // Range làm giống click thường ở anchor: anchor được chọn → chọn range, anchor bị bỏ chọn → bỏ chọn range
+    let shiftRangePaths = []; // chỉ những sách range đó đã đổi trạng thái
+    let shiftRangeEnd = -1;
+    let anchorSelects = true;
+
+    function setBookSelected(p, selected) {
+        if (selected) state.selectedBooks.add(p);
+        else state.selectedBooks.delete(p);
+        updateCardSelectionVisual(p, selected);
+    }
+
     // Toggle select 1 sách
-    // Nếu shiftKey = true → select range từ lastClickedIndex đến index hiện tại
+    // Nếu shiftKey = true → áp dụng range từ lastClickedIndex (anchor) đến index hiện tại
     function toggleSelectBook(path, shiftKey = false) {
         const currentIndex = getBookIndex(path);
 
         if (shiftKey && getLastClickedIndex() >= 0) {
-            // Shift+click → select tất cả cards trong range
-            getShiftSelectRange(getLastClickedIndex(), currentIndex).forEach(p => {
-                state.selectedBooks.add(p);
-                updateCardSelectionVisual(p, true);
-            });
+            const sameEnd = currentIndex === shiftRangeEnd;
+            shiftRangePaths.forEach(p => setBookSelected(p, !anchorSelects));
+            shiftRangePaths = [];
+            shiftRangeEnd = -1;
+            if (!sameEnd) {
+                shiftRangePaths = getShiftSelectRange(getLastClickedIndex(), currentIndex)
+                    .filter(p => state.selectedBooks.has(p) !== anchorSelects);
+                shiftRangePaths.forEach(p => setBookSelected(p, anchorSelects));
+                shiftRangeEnd = currentIndex;
+            }
         } else {
-            // Click thường → toggle 1 card
-            const selected = !state.selectedBooks.has(path);
-            if (selected) state.selectedBooks.add(path);
-            else state.selectedBooks.delete(path);
-            updateCardSelectionVisual(path, selected);
+            shiftRangePaths = [];
+            shiftRangeEnd = -1;
+            // Click thường → toggle 1 card, card này thành anchor
+            anchorSelects = !state.selectedBooks.has(path);
+            setBookSelected(path, anchorSelects);
             setLastClickedIndex(currentIndex);
         }
 
@@ -209,14 +228,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         const count = state.selectedBooks.size;
         txtSelectionCount.innerText = `${count} selected`;
 
-        // Multi-select doesn't apply in a Read Mode (click opens the PDF instead
-        // of selecting it), so hide the selection count and "Select all" there.
-        const isReadMode = state.clickBehavior !== "select";
-        txtSelectionCount.style.display = isReadMode ? "none" : "";
-        btnSelectAll.style.display      = isReadMode ? "none" : "";
-
         const hasSelection = count > 0;
-        btnBulkHide.style.display       = (hasSelection && state.viewMode === "library") ? "" : "none";
+        txtSelectionCount.style.display = hasSelection ? "" : "none";
         btnBulkRestore.style.display    = (hasSelection && state.viewMode === "trash")   ? "" : "none";
         btnClearSelection.style.display = hasSelection ? "" : "none";
     }
@@ -229,7 +242,6 @@ window.addEventListener("DOMContentLoaded", async () => {
         await refreshUi();
         setStatus(`${paths.length} book(s) ${message}.`, color);
     }
-    btnBulkHide.addEventListener("click", () => bulkAction(api.hideBook, "hidden", "gray"));
     btnBulkRestore.addEventListener("click", () => bulkAction(api.restoreBook, "restored", "green"));
     btnSelectAll.addEventListener("click", selectAllVisible);
     btnClearSelection.addEventListener("click", clearSelection);
@@ -248,6 +260,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         state.viewMode = "trash";
         state.currentFilterPath = null;
         state.selectedTags = [];
+        state.shortDescFilter = null;
+        state.longDescFilter = null;
+        renderDescFilters();
         state.selectedBooks.clear();
         btnTrashView.style.background = "var(--danger-soft)";
         btnTrashView.style.borderColor = "var(--danger)";
@@ -272,8 +287,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
 
     btnSettings.addEventListener("click", () => openSettings({
-        clickBehavior: state.clickBehavior,
-        onClickBehaviorChange: (value) => setClickBehavior(value),
         showShortDescription: state.showShortDescription,
         onShowShortDescriptionChange: (value) => setLargeCards(value),
         onAddPath: addPath,
@@ -400,38 +413,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
 
     // ==========================================
-    // BEHAVIOUR — dùng chung cho Settings và nút Behaviour trên toolbar
-    // ==========================================
-    function setClickBehavior(value) {
-        state.clickBehavior = value;
-        localStorage.setItem("clickBehavior", value);
-        if (value !== "summary") closeSummaryPanel();
-        updateBehaviourButton();
-        updateSelectionUI();
-        updateGrid();
-    }
-
-    // Nút Behaviour trên toolbar: hiện chế độ hiện tại, click mở menu chọn 1 trong 4
-    function updateBehaviourButton() {
-        const current = BEHAVIOURS.find(c => c.value === state.clickBehavior) || BEHAVIOURS[0];
-        btnBehaviour.innerText = `${current.label} ▾`;
-        btnBehaviour.title = `Behaviour: ${current.label} — ${current.hint}`;
-    }
-    bindMenuButton(btnBehaviour, () => {
-        const menu = showMenu(BEHAVIOURS.map(choice => {
-            const selected = choice.value === state.clickBehavior;
-            const content = el("span");
-            content.style.cssText = "display:flex; gap:8px;";
-            content.innerHTML = `<span style="width:14px; color:var(--primary);">${selected ? "✓" : ""}</span>
-                <span><div style="font-weight:${selected ? 600 : 500};">${choice.label}</div>
-                <div class="hint">${choice.hint}</div></span>`;
-            return { content, action: () => { if (!selected) setClickBehavior(choice.value); } };
-        }), btnBehaviour);
-        menu.style.minWidth = "230px";
-    });
-    updateBehaviourButton();
-
-    // ==========================================
     // CARD NHỎ / CARD LỚN — dùng chung cho Settings ("Show short description") và nút trên toolbar
     // ==========================================
     const ICON_LARGE_CARDS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/></svg>';
@@ -505,6 +486,31 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.untaggedOnly, (newUntagged) => { state.untaggedOnly = newUntagged; updateGrid(); });
     }
 
+    // 2 hàng Yes / No; click lại chip đang chọn → bỏ lọc
+    function renderDescFilters() {
+        descFilterContainer.innerHTML = "";
+        [["shortDescFilter", "Short description"], ["longDescFilter", "Long description"]].forEach(([key, label]) => {
+            const row = el("div");
+            row.style.cssText = "display:flex; align-items:center; gap:6px; margin-bottom:6px;";
+            const name = el("span", "", label);
+            name.style.cssText = "flex:1; font-size:12px; color:var(--text-secondary);";
+            row.appendChild(name);
+            [["yes", "Yes"], ["no", "No"]].forEach(([value, text]) => {
+                const chip = el("button", `tag-chip ${state[key] === value ? "selected" : ""}`, text);
+                chip.setAttribute("aria-pressed", String(state[key] === value));
+                chip.onclick = () => {
+                    state[key] = state[key] === value ? null : value;
+                    renderDescFilters();
+                    updateGrid();
+                };
+                row.appendChild(chip);
+            });
+            descFilterContainer.appendChild(row);
+        });
+    }
+    renderDescFilters();
+    initSidebarSections($("#sidebar-sections"));
+
     async function handleTagRenamed(oldName, newName) {
         try {
             await api.renameTag(oldName, newName);
@@ -556,9 +562,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             state.viewMode,
             state.selectedBooks,
             (path, shiftKey) => toggleSelectBook(path, shiftKey),
-            state.clickBehavior,
             state.untaggedOnly,
-            state.showShortDescription
+            state.showShortDescription,
+            { short: state.shortDescFilter, long: state.longDescFilter }
         );
 
         // Mirrors the live filter state to localStorage on every grid re-render so
@@ -570,6 +576,8 @@ window.addEventListener("DOMContentLoaded", async () => {
             currentSort: state.currentSort,
             selectedTags: state.selectedTags,
             untaggedOnly: state.untaggedOnly,
+            shortDescFilter: state.shortDescFilter,
+            longDescFilter: state.longDescFilter,
         });
         updateJumpLastButton();
     }
@@ -582,11 +590,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             .filter(x => x.book);
     }
 
-    // Only offered in Read Mode "open-reader" (per the feature's own scope —
-    // multi-select/Manage mode has no use for a reading-position shortcut).
     function updateJumpLastButton() {
         const entries = validLastReadEntries();
-        const show = state.clickBehavior === "open-reader" && entries.length > 0;
+        const show = entries.length > 0;
         btnJumpLast.style.display = show ? "" : "none";
         btnJumpLastArrow.style.display = show ? "" : "none";
         if (show) {
@@ -613,15 +619,20 @@ window.addEventListener("DOMContentLoaded", async () => {
         const f = entry.filters || {};
         state.currentFilterPath = f.currentFilterPath ?? null;
         state.currentSearch = f.currentSearch ?? "";
-        state.currentSort = f.currentSort ?? "name-asc";
+        // Sort đã bỏ (vd "missing-short" cũ) → về mặc định
+        const savedSort = f.currentSort ?? "name-asc";
+        state.currentSort = [...sortSelect.options].some(o => o.value === savedSort) ? savedSort : "name-asc";
         state.selectedTags = Array.isArray(f.selectedTags) ? f.selectedTags : [];
         state.untaggedOnly = !!f.untaggedOnly;
+        state.shortDescFilter = f.shortDescFilter ?? null;
+        state.longDescFilter = f.longDescFilter ?? null;
         state.selectedBooks.clear();
 
         searchInput.value = state.currentSearch;
         sortSelect.value = state.currentSort;
         highlightActiveFolder(state.currentFilterPath);
         renderTags();
+        renderDescFilters();
         updateSelectionUI();
         updateGrid();
 
