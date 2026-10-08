@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the Windows installers locally and publishes a GitHub release for the
-# current version: .msi + .exe as assets, notes = .msi download link + this
-# version's CHANGELOG.md section. The vX.Y.Z tag must already be pushed.
+# current version: .msi + .exe as assets, notes = .msi download link + the
+# CHANGELOG.md sections since the last published release. The vX.Y.Z tag must already be pushed.
 # Usage: bash scripts/publish-release.sh        (needs gh, logged in)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +13,13 @@ repo=DigitaleJungle/pdf-tag-simple
 v=$(node -p "require('./src-tauri/tauri.conf.json').version")
 tag="v$v"
 
-changes=$(awk -v v="$v" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md)
+# Notes cover this version plus every earlier one that never got a GitHub release
+# (tagged without publishing): all CHANGELOG sections newer than the latest release.
+prev=$("$gh" release list --repo "$repo" --limit 20 --json tagName -q '.[].tagName' | grep -vx "$tag" | head -1 || true)
+changes=$(awk -v v="$v" -v p="${prev#v}" '
+  index($0, "## [" v "]") == 1 {f=1; next}
+  f && /^## \[/ && (p == "" || index($0, "## [" p "]") == 1) {exit}
+  f' CHANGELOG.md)
 [ -n "$changes" ] || { echo "No CHANGELOG.md section for $v"; exit 1; }
 
 npm run tauri build
