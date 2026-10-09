@@ -135,6 +135,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Gọi từ f_reader.js khi reader đóng — refresh label/visibility của nút
         // "Continue reading" (nó có thể đã lưu 1 vị trí mới trong lúc đọc).
         onReaderClosed: () => updateJumpLastButton(),
+        onStarChanged: () => updateGrid(),
         // Gọi từ ui_grid_card.js khi click vào card
         openSummary: (book) => {
             openSummaryPanel(state.books.find(b => b.path === book.path) || book, {
@@ -580,6 +581,7 @@ window.addEventListener("DOMContentLoaded", async () => {
             longDescFilter: state.longDescFilter,
         });
         updateJumpLastButton();
+        renderTags(); // disabled tags depend on what's shown now
     }
 
     // The saved entries whose book still exists and isn't hidden/trashed —

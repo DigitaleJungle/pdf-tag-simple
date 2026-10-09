@@ -221,6 +221,25 @@ export async function openReader(book, initialPage = null) {
         updateBookmarkBtn();
     });
 
+    // Same star as the grid card / summary panel
+    const starBtn = toolbarIconButton("⭐");
+    function updateStarBtn() {
+        const starred = !!currentBook?.starred;
+        starBtn.style.opacity = starred ? "1" : "0.35";
+        starBtn.title = starred ? "Unstar" : "Star";
+    }
+    starBtn.addEventListener("click", async () => {
+        if (!currentBook) return;
+        try {
+            currentBook.starred = await api.toggleStar(currentBook.path);
+            updateStarBtn();
+            syncReaderSummary(); // re-render the panel's star
+            window.__APP_ACTIONS__?.onStarChanged?.();
+        } catch (err) {
+            console.error("Toggle star fail:", err);
+        }
+    });
+
     // Summary panel bên phải reader — trạng thái mở/đóng nhớ qua localStorage,
     // giữ nguyên khi chuyển sách (swipe/prev/next) và khi đóng/mở lại reader
     const summaryBtn = toolbarIconButton(
@@ -247,6 +266,10 @@ export async function openReader(book, initialPage = null) {
         }),
         onAi: (b) => window.__APP_ACTIONS__?.runAiOnBooks?.([b.path]),
         onUserClose: () => setReaderSummaryOpen(false),
+        onStarChanged: () => {
+            updateStarBtn();
+            window.__APP_ACTIONS__?.onStarChanged?.();
+        },
         // Trong reader: ‹ › chuyển cả reader (giống nút prev/next trên toolbar)
         onNavigate: (_b, dir) => goToAdjacent(dir),
     };
@@ -260,6 +283,7 @@ export async function openReader(book, initialPage = null) {
     });
     updateSummaryBtn();
 
+    rightGroup.appendChild(starBtn);
     rightGroup.appendChild(bookmarkBtn);
     rightGroup.appendChild(pageIndicator);
     rightGroup.appendChild(zoomWrap);
@@ -745,6 +769,7 @@ export async function openReader(book, initialPage = null) {
         title.title = newBook.path;
         updateNavButtons();
         updateBookmarkBtn();
+        updateStarBtn();
         syncReaderSummary();
 
         scrollArea.innerHTML = "";

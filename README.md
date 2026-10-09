@@ -23,7 +23,7 @@ Click **Update DB** again whenever files are added, moved or removed. Before eac
 ### Library
 - **Thumbnail grid** with small or large cards. Large cards also show the short description.
 - **Folders sidebar**: filter by library folder. The sidebar can be collapsed (`Ctrl + B`), and each sidebar section (Folders, Tags, Description) can be collapsed by clicking its title.
-- **Tag filter**: click tags to filter. Tags can be searched, renamed and deleted, and you can filter on untagged books.
+- **Tag filter**: click tags to filter. Tags that would leave no books are greyed out. Tags can be searched, renamed and deleted, and you can filter on untagged books.
 - **Description filter**: show only books that do (Yes) or don't (No) have a short and/or long description.
 - **Search** across file name, tags, short description and description.
 - **Sort** by name or date added.
@@ -47,6 +47,7 @@ Books open in the built-in reader. Turn off *Settings → General → Use the in
 The **summary panel** shows the cover, star, tags, descriptions, date added, path, page count and file size, with a large Read button and buttons for Open in default app, Edit details, Show in folder and AI auto. The panel can be resized, and it can also be opened inside the reader.
 
 ### Built-in reader
+- Star the book from the reader toolbar.
 - Zoom with the mouse wheel, keyboard or pinch, and swipe between books on touch screens.
 - **Continue reading**: remembers the book, page and filters you had, plus your last 3 books. You can bookmark a session so it is kept.
 - Rendered pages are cached on disk (size limit configurable under *Settings → General*).

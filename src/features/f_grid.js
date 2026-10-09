@@ -122,6 +122,11 @@ export function getLastClickedIndex() {
 }
 
 // Trả về paths của tất cả sách trong filteredBooks hiện tại
+// Lowercased tags of the books currently shown — f_tags.js disables tags that would give 0 results
+export function getFilteredTags() {
+    return new Set(gridState.filteredBooks.flatMap(b => (b.tags || []).map(t => t.toLowerCase())));
+}
+
 // Dùng cho selectAllVisible trong main.js — đảm bảo respect folder/search/tag filter
 export function getFilteredPaths() {
     return gridState.filteredBooks.map(b => b.path);

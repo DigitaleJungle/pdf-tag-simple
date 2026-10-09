@@ -392,6 +392,9 @@ button.section-title::before { content: "▾"; font-size: 10px; transition: tran
   border-color: var(--primary);
 }
 
+.tag-chip[aria-disabled="true"] { opacity: 0.4; cursor: default; }
+.tag-chip[aria-disabled="true"]:hover { background: var(--panel); border-color: var(--border); }
+
 .tag-chip.muted { color: var(--text-secondary); }
 .tag-chip.italic { font-style: italic; }
 

@@ -1,4 +1,5 @@
 import { el, input, button, openModal, showMenu } from "./ui.js";
+import { getFilteredTags } from "./f_grid.js";
 
 let expanded = false;
 
@@ -30,12 +31,22 @@ export function renderTagsUI(
         ? allTags.filter(t => t.name.toLowerCase().includes(filterKeyword))
         : allTags.slice(0, expanded ? 30 : 10);
 
+    // While filtering by tags, adding a tag no shown book has would give 0 results
+    const availableTags = !untaggedOnly && selectedTags.length > 0 ? getFilteredTags() : null;
+
     displayTags.forEach(tagObj => {
         const isSelected = selectedTags.includes(tagObj.name);
         const tagBtn = el("button", isSelected ? "tag-chip selected" : "tag-chip", `${tagObj.name} (${tagObj.count})`);
+        // aria-disabled, not disabled: a disabled button gets no right-click (rename/delete)
+        const unavailable = !isSelected && availableTags && !availableTags.has(tagObj.name.toLowerCase());
+        if (unavailable) {
+            tagBtn.setAttribute("aria-disabled", "true");
+            tagBtn.title = "No books match with this tag added";
+        }
 
         // Left click — toggle filter (luôn tạo array mới, không mutate array gốc)
         tagBtn.onclick = () => {
+            if (unavailable) return;
             const newSelected = isSelected
                 ? selectedTags.filter(t => t !== tagObj.name)
                 : [...selectedTags, tagObj.name];

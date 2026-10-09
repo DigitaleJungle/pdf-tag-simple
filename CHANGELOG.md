@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1] - 2026-10-09
+
+### Added
+- Star a book from the reader: there's a star button in the reader's toolbar, next to the bookmark.
+
+### Changed
+- While you filter by tags, tags that would leave no books (combined with your folder, search and description filters) are greyed out and can't be clicked. Right-click still lets you rename or delete them.
+
 ## [1.3.0] - 2026-10-09
 
 ### Added
