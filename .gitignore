@@ -27,3 +27,4 @@ dist-ssr
 src-tauri/target/
 .claude/skills/release/SKILL.md
 CLAUDE.md
+doc/*
