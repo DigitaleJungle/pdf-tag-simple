@@ -667,6 +667,45 @@ async fn call_openai_with_pdf(
     Ok(answer)
 }
 
+// Chat models the key can use, newest-looking first.
+// shortcut: reasoning models (o-series, gpt-5) are left out because call_openai sends
+// temperature + max_tokens, which they reject; list them once that request supports them.
+#[tauri::command]
+pub async fn openai_list_models(api_key: String) -> Result<Vec<String>, String> {
+    if api_key.trim().is_empty() {
+        return Err("Enter an OpenAI API key first.".to_string());
+    }
+    let response = reqwest::Client::new()
+        .get("https://api.openai.com/v1/models")
+        .bearer_auth(api_key.trim())
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach OpenAI: {}", e))?;
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if status.as_u16() == 401 {
+        return Err("OpenAI API key is invalid. Check it in AI Settings.".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!("OpenAI error {}: {}", status, text));
+    }
+    let data: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+
+    const EXCLUDE: [&str; 10] = [
+        "audio", "realtime", "tts", "transcribe", "image", "search", "instruct", "embedding", "codex", "gpt-5",
+    ];
+    let mut models: Vec<String> = data["data"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| m["id"].as_str().map(str::to_string))
+        .filter(|id| id.starts_with("gpt-") && !EXCLUDE.iter().any(|x| id.contains(x)))
+        .collect();
+    models.sort_by(|a, b| b.cmp(a));
+    Ok(models)
+}
+
 // ===== GEMINI =====
 // generateContent REST API, key gửi qua header x-goog-api-key (không để trong URL)
 // Free/paid do billing của Google Cloud project chứa key quyết định, không phải app

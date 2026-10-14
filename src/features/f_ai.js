@@ -116,9 +116,9 @@ export async function renderAiSettingsSection(container, ctx) {
     // Provider
     const providerSelect = select([
         { value: "openai", label: "OpenAI (API key)" },
+        { value: "chatgpt", label: "OpenAI (sign in)" },
         { value: "gemini", label: "Gemini (API key)" },
         { value: "gemini_free", label: "Gemini (free tier)" },
-        { value: "chatgpt", label: "ChatGPT (sign in with your plan) (beta)" },
         { value: "ollama", label: "Ollama (local)" },
     ], settings.provider);
     body.append(label("Provider"), providerSelect);
@@ -126,11 +126,39 @@ export async function renderAiSettingsSection(container, ctx) {
     // OpenAI section
     const openaiSection = section();
     const apiKeyInput = input("password", settings.openai_api_key, "sk-...");
-    const openaiModelSelect = select([
+    const openaiModelRow = el("div");
+    openaiModelRow.style.cssText = "display:flex; gap:8px; align-items:center;";
+    const openaiDefaults = [
         { value: "gpt-4o-mini", label: "gpt-4o-mini (fast, cheap)" },
         { value: "gpt-4o", label: "gpt-4o (more accurate)" },
-    ], settings.openai_model);
-    openaiSection.append(label("OpenAI API Key"), apiKeyInput, label("OpenAI Model"), openaiModelSelect);
+    ];
+    // Keep a model picked from "Load models" selectable after reopening
+    if (settings.openai_model && !openaiDefaults.some(o => o.value === settings.openai_model)) {
+        openaiDefaults.unshift({ value: settings.openai_model, label: settings.openai_model });
+    }
+    const openaiModelSelect = select(openaiDefaults, settings.openai_model);
+    openaiModelSelect.style.flex = "1";
+    const openaiLoadBtn = button("Load models", "small");
+    openaiModelRow.append(openaiModelSelect, openaiLoadBtn);
+    const openaiStatus = el("div", "status");
+    openaiSection.append(label("OpenAI API Key"), apiKeyInput, label("OpenAI Model"), openaiModelRow, openaiStatus);
+
+    async function loadOpenaiModels() {
+        setStatus(openaiStatus, "Loading models...");
+        openaiLoadBtn.disabled = true;
+        const saved = openaiModelSelect.value || settings.openai_model;
+        try {
+            const models = await api.openaiModels(apiKeyInput.value.trim());
+            if (saved && !models.includes(saved)) models.unshift(saved);
+            fillOptions(openaiModelSelect, models.map(id => ({ value: id, label: id, selected: id === saved })));
+            setStatus(openaiStatus, models.length ? "" : "No chat models available for this key", models.length ? "" : "error");
+        } catch (err) {
+            setStatus(openaiStatus, String(err), "error");
+        } finally {
+            openaiLoadBtn.disabled = false;
+        }
+    }
+    openaiLoadBtn.onclick = loadOpenaiModels;
 
     // Gemini section — dùng chung cho "gemini" và "gemini_free"
     const geminiSection = section();
@@ -204,9 +232,14 @@ export async function renderAiSettingsSection(container, ctx) {
     const chatgptSignInBtn = button("", "small");
     chatgptStatusRow.append(chatgptStatus, chatgptSignInBtn);
     const chatgptModelLabel = label("ChatGPT Model");
+    const chatgptModelRow = el("div");
+    chatgptModelRow.style.cssText = "display:flex; gap:8px; align-items:center;";
     const chatgptModelSelect = select([], "");
+    chatgptModelSelect.style.flex = "1";
+    const chatgptLoadBtn = button("Load models", "small");
+    chatgptModelRow.append(chatgptModelSelect, chatgptLoadBtn);
     chatgptSection.append(
-        label("ChatGPT Account"), chatgptStatusRow, chatgptModelLabel, chatgptModelSelect,
+        label("ChatGPT Account"), chatgptStatusRow, chatgptModelLabel, chatgptModelRow,
         hint("Signs in via your browser and uses your ChatGPT plan's limits. No API key needed."),
     );
 
@@ -220,12 +253,13 @@ export async function renderAiSettingsSection(container, ctx) {
             signedIn ? "ok" : "");
         chatgptSignInBtn.innerText = signedIn ? "Sign out" : chatgptState === "waiting" ? "Cancel" : "Sign in with ChatGPT";
         chatgptModelLabel.hidden = !signedIn;
-        chatgptModelSelect.hidden = !signedIn;
+        chatgptModelRow.hidden = !signedIn;
     }
 
     async function loadChatgptModels() {
+        const saved = chatgptModelSelect.value || settings.chatgpt_model;
         fillOptions(chatgptModelSelect, [{ value: "", label: "Loading models..." }]);
-        const saved = settings.chatgpt_model;
+        chatgptLoadBtn.disabled = true;
         try {
             const models = await api.chatgptModels();
             if (saved && !models.some(m => m.slug === saved)) models.unshift({ slug: saved, display_name: saved });
@@ -235,8 +269,11 @@ export async function renderAiSettingsSection(container, ctx) {
         } catch (err) {
             fillOptions(chatgptModelSelect, [{ value: saved || "", label: saved || "Could not load models" }]);
             setStatus(chatgptStatus, String(err), "error");
+        } finally {
+            chatgptLoadBtn.disabled = false;
         }
     }
+    chatgptLoadBtn.onclick = loadChatgptModels;
 
     chatgptSignInBtn.onclick = async () => {
         if (chatgptState === "waiting") {

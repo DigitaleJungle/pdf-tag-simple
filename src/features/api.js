@@ -52,6 +52,7 @@ export const api = {
 
     // Gemini — danh sách model dùng được với API key này
     geminiModels: (apiKey) => invoke("gemini_list_models", { apiKey }),
+    openaiModels: (apiKey) => invoke("openai_list_models", { apiKey }),
 
     // Sign in with ChatGPT — dùng plan ChatGPT của user thay vì API key
     // signIn mở browser và chờ tới khi user đăng nhập xong (hoặc cancel/timeout)

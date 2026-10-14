@@ -99,6 +99,7 @@ fn main() {
             ai_service::suggest_tags,
             ai_service::check_ollama,
             ai_service::gemini_list_models,
+            ai_service::openai_list_models,
             chatgpt_auth::chatgpt_status,
             chatgpt_auth::chatgpt_sign_in,
             chatgpt_auth::chatgpt_cancel_sign_in,

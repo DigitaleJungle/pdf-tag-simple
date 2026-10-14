@@ -60,9 +60,9 @@ Providers (set in *Settings → AI Settings*):
 | Provider | Notes |
 |----------|-------|
 | OpenAI (API key) | Get a key at [platform.openai.com](https://platform.openai.com/) |
+| OpenAI (sign in) | Sign in with your ChatGPT account and use its plan. No API key needed. |
 | Gemini (API key) | Get a key at [aistudio.google.com](https://aistudio.google.com/) |
 | Gemini (free tier) | Rate-limited (one request about every 6.5 s). Google may use free-tier data. |
-| ChatGPT (beta) | Sign in with your ChatGPT plan. No API key needed. |
 | Ollama (local) | Install [Ollama](https://ollama.com/), pull a model and point the app at `http://localhost:11434` |
 
 The **AI method** sets what the AI gets for each book:

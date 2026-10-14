@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0] - 2026-10-14
+
+### Added
+- Both OpenAI providers have a **Load models** button. With an API key it lists the chat models your key can use (reasoning models such as o3 and GPT-5 aren't supported yet); when signed in it reloads your account's models.
+
+### Changed
+- The *ChatGPT (sign in with your plan)* AI provider is now called *OpenAI (sign in)* and comes right after *OpenAI (API key)* in the provider list.
+
 ## [1.3.2] - 2026-10-14
 
 ### Fixed
