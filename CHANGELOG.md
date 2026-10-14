@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.2] - 2026-10-14
+
+### Fixed
+- *Settings → AI* showed the settings of every provider at once (e.g. both the OpenAI and the ChatGPT model). It now only shows the ones for the selected provider.
+
 ## [1.3.1] - 2026-10-09
 
 ### Added

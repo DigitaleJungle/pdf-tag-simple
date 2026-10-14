@@ -86,6 +86,8 @@
    2. RESET & BASE
 ------------------------------------------------ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* The hidden attribute must win over inline/class display rules (e.g. AI provider sections) */
+[hidden] { display: none !important; }
 
 html, body {
   height: 100%;
