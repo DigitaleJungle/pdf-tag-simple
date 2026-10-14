@@ -106,6 +106,7 @@ Everything is stored in the app data folder, `%AppData%\com.menco.pdftag\` on Wi
 - `library_books.json`: books, tags, stars and descriptions
 - `cache\`: cover thumbnails and the reader's page cache
 - `auto_backup_before_update.json`: backup made before each Update DB
+- `.window-state.json`: the window's size and position from the last time you closed the app
 
 Your PDFs are never modified.
 

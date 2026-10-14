@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.1] - 2026-10-15
+
+### Fixed
+- The app now opens with the window size and position (and maximized state) it had when you last closed it, instead of always 800×600.
+
 ## [1.4.0] - 2026-10-14
 
 ### Added
